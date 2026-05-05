@@ -1,0 +1,39 @@
+server:
+  port: 8085
+
+spring:
+  application:
+    name: summarization-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/loadtest
+    username: loadtest
+    password: loadtest
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: summarization-service-group
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.use.type.headers: false
+        spring.json.value.default.type: com.loadtest.summarization.dto.SummarizationTaskEvent
+        spring.json.trusted.packages: "*"
+
+kafka:
+  topic:
+    summarization-tasks: summarization-tasks
+
+loadtest:
+  summarization:
+    litellm-base-url-override: ${LOADTEST_SUMMARIZATION_LITELLM_BASE_URL_OVERRIDE:}
+    http:
+      connect-timeout-millis: 15000
+      response-timeout-seconds: 600
+      max-in-memory-mb: 16
+
+logging:
+  level:
+    com.loadtest: INFO
+    org.springframework: INFO

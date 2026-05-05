@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "classpath:/schemas/metrics-config.schema.json",
+  "title": "Конфиг сбора метрик после прогона",
+  "description": "Список HTTP-запросов к Prometheus, Elasticsearch и т.п. В URL и query допускаются плейсхолдеры {testStartTimeMs}, {testEndTimeMs} (подставляет metrics-collector).",
+  "type": "object",
+  "required": ["requests"],
+  "additionalProperties": false,
+  "properties": {
+    "delaySeconds": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "title": "Задержка перед сбором (сек)",
+      "description": "Пауза перед первым запросом после завершения теста"
+    },
+    "requests": {
+      "type": "array",
+      "minItems": 1,
+      "title": "HTTP-запросы",
+      "items": {
+        "type": "object",
+        "title": "Запрос",
+        "required": ["url"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Имя источника",
+            "description": "Ключ в сохранённых метриках; если пусто — используется URL"
+          },
+          "method": {
+            "type": "string",
+            "title": "Метод",
+            "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+            "default": "GET"
+          },
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "title": "URL",
+            "description": "Полный URL эндпоинта (например http://prometheus:9090/api/v1/query)"
+          },
+          "headers": {
+            "type": "object",
+            "title": "Заголовки",
+            "additionalProperties": { "type": "string" }
+          },
+          "queryParams": {
+            "title": "Query",
+            "description": "Строка key=value&... или объект ключ → значение",
+            "anyOf": [
+              { "type": "string" },
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": ["string", "number", "boolean"]
+                }
+              }
+            ]
+          },
+          "body": {
+            "title": "Тело (JSON)",
+            "description": "Для POST/PUT/PATCH — произвольный JSON",
+            "anyOf": [
+              { "type": "object" },
+              { "type": "array" },
+              { "type": "string" },
+              { "type": "number" },
+              { "type": "boolean" },
+              { "type": "null" }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+
+model_list:
+  - model_name: loadtest-summary
+    litellm_params:
+      model: gpt-4o-mini
+  - model_name: loadtest-summary-nano
+    litellm_params:
+      model: gpt-5.4-nano
+
+litellm_settings:
+  drop_params: true
+

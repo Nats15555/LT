@@ -1,0 +1,40 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: metrics-collector-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/loadtest
+    username: loadtest
+    password: loadtest
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: metrics-collector-group
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+
+kafka:
+  topic:
+    metrics-collection-tasks: metrics-collection-tasks
+    summarization-tasks: summarization-tasks
+
+loadtest:
+  summarization:
+    default-summarizer-name: ""
+  external-summary:
+    window-minutes: 2
+  app:
+    base-url: ${LOADTEST_APP_BASE_URL:http://localhost:8080}
+
+metrics:
+  host-overrides: {}
+
+logging:
+  level:
+    com.loadtest: INFO
+    org.springframework: INFO
+

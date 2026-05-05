@@ -1,0 +1,2164 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LoadTest — очередь, история, отчёты (LiteLLM или внешний контур)</title>
+  <style>
+    :root {
+      --accent-bg: #2a3d42;
+      --accent-border: #3d5a62;
+      --accent-hover: #354d54;
+      --accent-edge: #4a6a73;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 1rem; background: #1a1b1e; color: #e4e4e4; }
+    h1 { font-size: 1.5rem; margin-top: 0; }
+    nav { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+    nav button { padding: 0.5rem 1rem; background: #2d2e32; border: 1px solid #444; color: #e4e4e4; border-radius: 6px; cursor: pointer; }
+    nav button:hover { background: var(--accent-hover); border-color: var(--accent-border); }
+    nav button.active { background: var(--accent-bg); border-color: var(--accent-edge); color: #e8eef0; }
+    section { display: none; }
+    section.visible { display: block; }
+    table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+    th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid #333; }
+    th { background: #2d2e32; }
+    tr:hover { background: #25262a; }
+    a { color: #7eb8c4; }
+    a:hover { text-decoration: underline; }
+    .btn { padding: 0.4rem 0.8rem; background: var(--accent-bg); color: #e4e4e4; border: 1px solid var(--accent-border); border-radius: 6px; cursor: pointer; }
+    .btn:hover { background: var(--accent-hover); border-color: var(--accent-edge); }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .form-group { margin-bottom: 0.8rem; }
+    .form-group label { display: block; margin-bottom: 0.25rem; color: #aaa; }
+    .form-group input, .form-group select, .form-group textarea { width: 100%; max-width: 600px; padding: 0.5rem; background: #2d2e32; border: 1px solid #444; color: #e4e4e4; border-radius: 4px; }
+    textarea { min-height: 80px; font-family: monospace; font-size: 0.9rem; }
+    .msg { padding: 0.5rem; border-radius: 4px; margin-bottom: 0.5rem; }
+    .msg.err { background: #3d2020; color: #f88; }
+    .msg.ok { background: #1e3d20; color: #8f8; }
+    .artifacts-list { list-style: none; padding: 0; margin: 0; }
+    .artifacts-list li { padding: 0.35rem 0; border-bottom: 1px solid #333; }
+    .metrics-list .metrics-item { display: block; }
+    .metrics-list .metrics-data { margin: 0.25rem 0 0.5rem 0; font-size: 0.75rem; max-height: 10rem; overflow: auto; }
+    .meta { font-size: 0.85rem; color: #888; }
+    .detail-box { background: #2d2e32; padding: 1rem; border-radius: 6px; overflow: auto; }
+    .detail-box pre { margin: 0; white-space: pre-wrap; word-break: break-all; font-size: 0.85rem; }
+    .btn-secondary { background: #25262a; border-color: #555; color: #e4e4e4; }
+    .btn-secondary:hover { background: #35363a; border-color: #666; }
+    .btn-danger { background: #3d2525; color: #e8a0a0; border-color: #5c3333; }
+    .btn-danger:hover { background: #4d3030; border-color: #6c4040; }
+    .btn-small { padding: 0.25rem 0.5rem; font-size: 0.85rem; }
+    .actions-cell { white-space: nowrap; }
+    .actions-cell .btn { margin-right: 0.25rem; }
+    .expand-icon { display: inline-block; width: 1.2rem; cursor: pointer; user-select: none; }
+    .history-detail-row td { background: #1a1b1e !important; vertical-align: top; }
+    .history-detail-inner { padding: 1rem; background: #25262a; text-align: left; border-left: 4px solid var(--accent-edge); border-radius: 0 6px 6px 0; }
+    .history-detail-inner h4 { margin: 0.5rem 0 0.25rem; font-size: 0.9rem; color: #aaa; }
+    .history-detail-inner h4:first-child { margin-top: 0; }
+    .history-detail-inner pre { margin: 0; white-space: pre-wrap; word-break: break-all; font-size: 0.8rem; max-height: 12rem; overflow: auto; }
+    .history-detail-inner > .copy-block { background: #2d2e32; padding: 0.75rem 1rem; margin-bottom: 0.75rem; border-radius: 6px; border-left: 3px solid #555; }
+    .history-detail-inner > h4 + ul.artifacts-list { background: #2d2e32; padding: 0.75rem 1rem; margin: 0.25rem 0 1rem 0; border-radius: 6px; border-left: 3px solid #555; }
+    .history-detail-inner > h4 + ul.metrics-list { background: #2d2e32; padding: 0.75rem 1rem; margin: 0.25rem 0 0 0; border-radius: 6px; border-left: 3px solid #555; }
+    .history-detail-inner .metrics-list .metrics-item { background: #35363a; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; border-radius: 4px; border-left: 3px solid #666; }
+    .history-detail-inner .metrics-list .metrics-item:last-child { margin-bottom: 0; }
+    .summary-block .summary-text { white-space: pre-wrap; margin: 0.5rem 0 0; font-size: 0.9rem; line-height: 1.4; }
+    .copy-block { margin-bottom: 0.75rem; }
+    .copy-block h4 { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+    .copy-block h4 .btn-copy { margin-left: auto; font-size: 0.8rem; padding: 0.2rem 0.5rem; }
+    .metrics-list .copy-block { margin-bottom: 0.5rem; }
+    .metrics-list .metrics-item .btn-copy { margin-left: 0.5rem; vertical-align: middle; }
+    .history-detail-actions { margin-bottom: 1rem; padding: 0.5rem 0; }
+    .history-detail-actions .btn-rerun { margin-right: 0.5rem; }
+    .pagination-bar { display: flex; gap: 0.5rem; align-items: center; margin: 0.5rem 0; }
+    .pagination-bar .meta { margin: 0; }
+    .checkbox-wrap { display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none; }
+    .checkbox-wrap input[type="checkbox"] { width: 1.25rem; height: 1.25rem; margin: 0; cursor: pointer; accent-color: var(--accent-edge); }
+    .tools-detail-row td { background: #1a1b1e !important; vertical-align: top; }
+    .tools-detail-inner { padding: 1rem; background: #25262a; border-left: 4px solid var(--accent-edge); border-radius: 0 6px 6px 0; }
+    .tools-detail-inner pre { margin: 0; white-space: pre-wrap; word-break: break-all; font-size: 0.85rem; background: #2d2e32; padding: 0.75rem 1rem; border-radius: 6px; border-left: 3px solid #555; }
+    .subnav { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+    .subnav button { padding: 0.5rem 1rem; background: #2d2e32; border: 1px solid #444; color: #e4e4e4; border-radius: 6px; cursor: pointer; }
+    .subnav button:hover { background: var(--accent-hover); border-color: var(--accent-border); }
+    .subnav button.active { background: var(--accent-bg); border-color: var(--accent-edge); color: #e8eef0; }
+    .config-panel { display: none; }
+    .config-panel.visible { display: block; }
+
+    /* Страница просмотра прогона (отдельный экран по клику из истории) */
+    .history-detail-page { max-width: 960px; margin: 0 auto; padding: 1rem 0; }
+    .history-detail-page .back-bar { margin-bottom: 1.5rem; }
+    .history-detail-page .back-bar a { color: #7eb8c4; text-decoration: none; font-size: 0.95rem; }
+    .history-detail-page .back-bar a:hover { text-decoration: underline; }
+    .block-card { background: #25262a; border: 1px solid #3d3e42; border-radius: 8px; margin-bottom: 1.25rem; overflow: hidden; }
+    .block-card-title { margin: 0; padding: 0.75rem 1rem; background: #2d2e32; border-bottom: 1px solid #3d3e42; font-size: 1rem; color: #e4e4e4; }
+    .block-card-body { padding: 1rem; }
+    .block-card-body pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 0.85rem; max-height: 20rem; overflow: auto; }
+    .block-card-body ul { margin: 0.5rem 0 0; padding-left: 1.25rem; }
+    .block-card.summary-card .block-card-body { font-size: 0.95rem; line-height: 1.5; }
+    .block-card.summary-card .summary-sections { margin: 0; }
+    .block-card.summary-card .summary-section { margin-bottom: 1rem; }
+    .block-card.summary-card .summary-section:last-child { margin-bottom: 0; }
+    .block-card.summary-card .summary-section-title { font-size: 0.9rem; color: #7eb8c4; margin: 0 0 0.35rem; font-weight: 600; }
+    .block-card.summary-card .summary-section-body { margin: 0; white-space: normal; color: #d0d0d0; line-height: 1.5; }
+    .block-card.summary-card .summary-section-body .summary-subtitle { font-size: 0.9rem; color: #9ec8d0; margin: 0.75rem 0 0.25rem; font-weight: 600; display: block; }
+    .metrics-config-ui { max-width: 42rem; margin-top: 0.5rem; color: #e4e4e4; }
+    .metrics-config-ui .metrics-config-delay { margin-bottom: 1rem; }
+    .metrics-config-ui .metrics-config-delay input { max-width: 7rem; }
+    .metrics-req-card {
+      background: #25262a;
+      border: 1px solid #3d3e42;
+      border-radius: 8px;
+      margin-bottom: 0.85rem;
+      overflow: hidden;
+    }
+    .metrics-req-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      padding: 0.45rem 0.75rem;
+      background: #2d2e32;
+      border-bottom: 1px solid #444;
+    }
+    .metrics-req-card-title { font-weight: 600; font-size: 0.9rem; color: #7eb8c4; margin: 0; }
+    .metrics-req-fields { padding: 0.65rem 0.85rem 0.85rem; }
+    .metrics-req-fields .form-group { margin-bottom: 0.55rem; }
+    .metrics-req-fields .form-group:last-child { margin-bottom: 0; }
+    .metrics-req-fields label { display: block; margin-bottom: 0.2rem; color: #aaa; font-size: 0.82rem; }
+    .metrics-req-fields input[type="text"],
+    .metrics-req-fields input[type="url"],
+    .metrics-req-fields select,
+    .metrics-req-fields textarea {
+      width: 100%; max-width: 100%;
+      padding: 0.45rem 0.5rem;
+      background: #2d2e32;
+      border: 1px solid #555;
+      color: #e4e4e4;
+      border-radius: 4px;
+      font: inherit;
+      font-size: 0.88rem;
+    }
+    .metrics-req-fields textarea { min-height: 2.75rem; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 0.8rem; }
+    .metrics-req-fields input:focus, .metrics-req-fields select:focus, .metrics-req-fields textarea:focus {
+      outline: none;
+      border-color: var(--accent-edge);
+    }
+    .metrics-req-fields .metrics-field-hint { display: block; margin-top: 0.2rem; font-size: 0.75rem; color: #777; line-height: 1.35; }
+    #metricsConfigRaw { width: 100%; max-width: 42rem; }
+  </style>
+</head>
+<body>
+  <h1>LoadTest</h1>
+  <p class="meta" style="margin-top:-0.5rem;margin-bottom:1rem">Очередь и история прогонов. Маршруты LLM задаются во вкладке «Суммаризаторы»: <strong>OPENAI</strong> — отчёт через summarization-service (часто LiteLLM на :4000), <strong>EXTERNAL</strong> — отчёт во внешнем контуре (push/callback), без LiteLLM.</p>
+  <nav>
+    <button type="button" data-tab="queue">Очередь</button>
+    <button type="button" data-tab="history">История</button>
+    <button type="button" data-tab="run">Запустить тест</button>
+    <button type="button" data-tab="config">Конфигурация системы</button>
+  </nav>
+
+  <section id="queue" class="visible">
+    <p>
+      <button type="button" class="btn" id="refreshQueue">Обновить</button>
+      <button type="button" class="btn" id="queuePauseToggle">Пауза очереди</button>
+    </p>
+    <p id="queuePauseLabel" class="meta"></p>
+    <div class="pagination-bar">
+      <button type="button" class="btn btn-secondary btn-small" id="queuePrevPage">← Назад</button>
+      <span class="meta" id="queuePageInfo">Страница 1</span>
+      <button type="button" class="btn btn-secondary btn-small" id="queueNextPage">Вперёд →</button>
+    </div>
+    <div id="queueTable"></div>
+  </section>
+
+  <section id="history">
+    <div id="historyListView">
+      <p><button type="button" class="btn" id="refreshHistory">Обновить</button></p>
+      <div class="pagination-bar">
+        <button type="button" class="btn btn-secondary btn-small" id="historyPrevPage">← Назад</button>
+        <span class="meta" id="historyPageInfo">Страница 1</span>
+        <button type="button" class="btn btn-secondary btn-small" id="historyNextPage">Вперёд →</button>
+      </div>
+      <p class="meta" style="max-width:52rem">Отчёт можно получить через LiteLLM или <strong>без него</strong> (внешний контур): при перезапросе отчёта выберите маршрут из группы «Внешний контур». Если группы нет, создайте маршрут с провайдером <code>EXTERNAL</code> в «Конфигурация → Суммаризаторы».</p>
+      <div id="historyTable"></div>
+    </div>
+    <div id="historyDetailPage" class="history-detail-page" style="display:none">
+      <div class="back-bar"><a href="#" id="historyDetailBack">← К истории</a></div>
+      <div id="historyDetailContent"></div>
+    </div>
+  </section>
+
+  <section id="run">
+    <div id="runMsg"></div>
+    <p class="meta">Файл и команда — как раньше. Если нужен текстовый отчёт, выберите <strong>маршрут LLM</strong>: в списке видно провайдер — <span class="meta">OPENAI · через summarization (LiteLLM и др.)</span> или <span class="meta">EXTERNAL · внешний контур</span>. Для LiteLLM-ветки в конфиге задаются base URL без <code>/v1/...</code> и model id (например <code>loadtest-summary</code>).</p>
+    <form id="runForm">
+      <div class="form-group">
+        <label>Инструмент</label>
+        <select name="tool" id="toolSelect" required></select>
+      </div>
+      <div class="form-group">
+        <label>Профиль Docker</label>
+        <select name="dockerExecutionProfileId" id="dockerProfileSelect" required></select>
+        <p class="meta" style="margin-top:0.35rem">Несколько профилей могут указывать на один и тот же демон (пустой URI) — тогда отличаются лимиты и число параллельных прогонов.</p>
+      </div>
+      <div class="form-group">
+        <label>Файл теста (.py для Locust, .js для K6)</label>
+        <input type="file" name="file" id="fileInput" required accept=".py,.js,.jmx">
+      </div>
+      <div class="form-group">
+        <label>Команда (плейсхолдеры: {fileName}, {reportBaseName})</label>
+        <textarea name="command" id="command" required placeholder="locust -f /mnt/test/{fileName} --headless -H http://test-app-1:8080 -u 10 -r 2 -t 60s --html /mnt/reports/{reportBaseName}.html --csv /mnt/reports/{reportBaseName}" title="Цель -H должна резолвиться из контейнера теста (та же Docker-сеть, напр. test-apps → loadtest_loadtest-network). Иначе замените на http://host.docker.internal:8081 и т.п."></textarea>
+      </div>
+      <div class="form-group">
+        <label>Ожидаемая длительность (сек)</label>
+        <input type="number" name="expectedDurationSeconds" id="expectedDurationSeconds" required min="1" value="90">
+      </div>
+      <div class="form-group metrics-config-block">
+        <label class="checkbox-wrap">
+          <input type="checkbox" id="metricsConfigEnabled">
+          Сбор метрик после теста (HTTP-запросы к API)
+        </label>
+        <p class="meta" style="margin: 0.35rem 0 0.5rem; max-width: 46rem">Простая форма: несколько HTTP-запросов по очереди после теста. Формат совпадает с <a id="metricsSchemaLink" href="#" target="_blank" rel="noopener">JSON Schema</a> на сервере. В URL и query — плейсхолдеры <code>{testStartTimeMs}</code> и <code>{testEndTimeMs}</code>.</p>
+        <div id="metricsConfigEditorWrap" style="display:none;">
+          <div class="metrics-config-ui" id="metricsConfigUi">
+            <div class="form-group metrics-config-delay">
+              <label>Пауза перед сбором (сек)</label>
+              <input type="number" id="metricsDelaySeconds" min="0" step="1" value="0">
+            </div>
+            <div id="metricsRequestsList"></div>
+            <p style="margin: 0.35rem 0 0"><button type="button" class="btn btn-small" id="metricsAddRequest">+ Добавить запрос</button></p>
+          </div>
+          <p style="margin-top:0.65rem"><button type="button" class="btn btn-secondary btn-small" id="metricsConfigRawToggle">Посмотреть итоговый JSON</button></p>
+          <textarea id="metricsConfigRaw" style="display:none; margin-top:0.5rem; min-height: 160px;" readonly spellcheck="false"></textarea>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Маршрут отчёта (опционально): LiteLLM или внешний</label>
+        <select name="summarizer" id="summarizerSelect">
+          <option value="">— без суммаризации —</option>
+        </select>
+      </div>
+      <button type="submit" class="btn">Отправить в очередь</button>
+    </form>
+  </section>
+
+  <section id="config">
+    <nav class="subnav">
+      <button type="button" data-subtab="tools">Инструменты</button>
+      <button type="button" data-subtab="summarizers">Суммаризаторы</button>
+      <button type="button" data-subtab="docker">Docker</button>
+    </nav>
+
+    <div id="config-tools" class="config-panel visible">
+      <p><button type="button" class="btn" id="refreshTools">Обновить</button></p>
+      <div style="margin-bottom: 1.5rem;">
+        <h3>Добавить инструмент</h3>
+        <form id="toolForm">
+          <div class="form-group">
+            <label>Имя (например LOCUST, K6, JMETER)</label>
+            <input type="text" name="name" required placeholder="K6">
+          </div>
+          <div class="form-group">
+            <label>Docker образ</label>
+            <input type="text" name="dockerImage" required placeholder="grafana/k6:latest">
+          </div>
+          <div class="form-group">
+            <label>Расширения файлов (через запятую)</label>
+            <input type="text" name="fileExtensions" required placeholder=".js,.mjs">
+          </div>
+          <div class="form-group">
+            <label class="checkbox-wrap"><input type="checkbox" name="enabled" checked> Включён</label>
+          </div>
+          <button type="submit" class="btn" id="toolFormSubmit">Создать</button>
+          <button type="button" class="btn btn-secondary" id="toolFormCancel" style="display:none;">Отмена</button>
+        </form>
+        <div id="toolFormMsg"></div>
+      </div>
+      <h3>Список инструментов</h3>
+      <div id="toolsTable"></div>
+    </div>
+
+    <div id="config-summarizers" class="config-panel">
+      <p><button type="button" class="btn" id="refreshSummarizers">Обновить</button></p>
+      <p class="meta">Колонка <strong>Провайдер</strong>: <code>OPENAI</code> — <strong>summarization-service</strong> (<code>POST {baseUrl}/v1/chat/completions</code>, часто LiteLLM; ключ — env в summarization, не в браузере). <code>EXTERNAL</code> — полный URL приёма пакета в поле <strong>Base URL</strong> (ingest, POST JSON); после метрик пакет уходит туда, ответ <code>received</code>, затем контур вызывает <code>POST …/external-llm/summary</code>. Включение/выключение — чекбокс «Включён» у маршрута.</p>
+      <div style="margin-bottom: 1.5rem;">
+        <h3>Добавить маршрут</h3>
+        <form id="summarizerForm">
+          <div class="form-group">
+            <label>Имя (уникальное, например MY_LITELLM, OPENAI_DIRECT)</label>
+            <input type="text" name="name" required placeholder="MY_LITELLM_ROUTE">
+          </div>
+          <div class="form-group">
+            <label>Провайдер</label>
+            <select name="provider" id="summarizerProviderSelect">
+              <option value="">— выберите провайдер —</option>
+              <option value="OPENAI">OPENAI — вызов через summarization-service (LiteLLM и др.)</option>
+              <option value="EXTERNAL">EXTERNAL — callback в вашем контуре (package + summary)</option>
+            </select>
+          </div>
+          <div id="summarizerProviderSpecificFields" style="display:none">
+            <div class="form-group">
+              <label id="summarizerBaseUrlLabel">Base URL (LiteLLM / OpenAI — без суффикса /v1/...)</label>
+              <input type="text" name="baseUrl" id="summarizerBaseUrlInput" placeholder="http://localhost:4000">
+            </div>
+            <div class="form-group" id="summarizerModelIdRow">
+              <label id="summarizerModelIdLabel">Model ID (имя модели)</label>
+              <input type="text" name="modelId" placeholder="loadtest-summary">
+            </div>
+            <div class="form-group" id="summarizerApiKeyRow">
+              <label>Имя переменной окружения для Bearer-токена (опционально)</label>
+              <input type="text" name="apiKeyEnvVar" placeholder="LITELLM_MASTER_KEY" title="Переменная в окружении summarization-service, например LITELLM_MASTER_KEY для LiteLLM">
+            </div>
+            <div class="form-group">
+              <label class="checkbox-wrap"><input type="checkbox" name="enabled" checked> Включён</label>
+            </div>
+          </div>
+          <button type="submit" class="btn" id="summarizerFormSubmit">Создать</button>
+          <button type="button" class="btn btn-secondary" id="summarizerFormCancel" style="display:none;">Отмена</button>
+        </form>
+        <div id="summarizerFormMsg"></div>
+      </div>
+      <h3>Список маршрутов</h3>
+      <div id="summarizersTable"></div>
+    </div>
+
+    <div id="config-docker" class="config-panel">
+      <p><button type="button" class="btn" id="refreshDocker">Обновить</button></p>
+      <div id="dockerContent"></div>
+      <div id="dockerFormBox" style="margin-top:1rem;">
+        <h3 id="dockerFormTitle">Создать конфигурацию</h3>
+        <form id="dockerForm">
+          <input type="hidden" id="dockerEditingProfileId" value="">
+          <div class="form-group">
+            <label>Имя профиля</label>
+            <input type="text" name="profileName" id="dockerProfileName" required placeholder="Default">
+          </div>
+          <div class="form-group">
+            <label>Docker Engine URI (необязательно)</label>
+            <input type="text" name="dockerHostUri" id="dockerHostUri" autocomplete="off" placeholder="Пусто = DOCKER_HOST / сокет процесса execution">
+          </div>
+          <div class="form-group">
+            <label>Named volume для bindов (необязательно)</label>
+            <input type="text" name="namedVolumeForChildBinds" id="namedVolumeForChildBinds" autocomplete="off" placeholder="loadtest_execution-data">
+          </div>
+          <div class="form-group">
+            <label><input type="checkbox" name="dockerProfileEnabled" id="dockerProfileEnabled" checked> Профиль включён</label>
+          </div>
+          <div class="form-group">
+            <label>Memory limit (MB)</label>
+            <input type="number" name="memoryLimitMb" min="1" placeholder="512">
+          </div>
+          <div class="form-group">
+            <label>Memory reservation (MB)</label>
+            <input type="number" name="memoryReservationMb" min="1" placeholder="256">
+          </div>
+          <div class="form-group">
+            <label>CPU limit</label>
+            <input type="number" name="cpuLimit" min="0" step="0.01" placeholder="1.0">
+          </div>
+          <div class="form-group">
+            <label>CPU shares</label>
+            <input type="number" name="cpuShares" min="0" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label>Max concurrent containers</label>
+            <input type="number" name="maxConcurrentContainers" min="1" required placeholder="1">
+          </div>
+          <div class="form-group">
+            <label>Network mode</label>
+            <input type="text" name="networkMode" placeholder="bridge">
+          </div>
+          <div class="form-group">
+            <label>Restart policy</label>
+            <input type="text" name="restartPolicy" placeholder="no">
+          </div>
+          <div class="form-group">
+            <label>Restart max retries</label>
+            <input type="number" name="restartMaxRetries" min="0" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label>Log driver</label>
+            <input type="text" name="logDriver" placeholder="json-file">
+          </div>
+          <div class="form-group">
+            <label>Log max size</label>
+            <input type="text" name="logMaxSize" placeholder="10m">
+          </div>
+          <div class="form-group">
+            <label>Log max files</label>
+            <input type="number" name="logMaxFiles" min="1" placeholder="3">
+          </div>
+          <div class="form-group">
+            <label>Environment variables (JSON)</label>
+            <textarea name="environmentVariables" rows="2" placeholder="{}"></textarea>
+          </div>
+          <div class="form-group">
+            <label>Labels (JSON)</label>
+            <textarea name="labels" rows="2" placeholder="{}"></textarea>
+          </div>
+          <button type="submit" class="btn" id="dockerFormSubmit">Создать</button>
+          <button type="button" class="btn btn-secondary" id="dockerFormCancel" style="display:none;">Отмена</button>
+        </form>
+        <div id="dockerFormMsg"></div>
+      </div>
+      <p style="margin-top:1rem;"><button type="button" class="btn btn-danger" id="dockerDelete" style="display:none;">Удалить конфигурацию</button></p>
+    </div>
+
+  </section>
+
+  <script>
+    // Если страница открыта не с app-module (8080), запросы идут на 8080
+    const API = (window.location.port === '8080' ? '' : 'http://localhost:8080') + '/api/v1/loadtest';
+
+    const METRICS_HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
+    const METRICS_DEFAULT_REQUEST = {
+      name: 'prometheus',
+      method: 'GET',
+      url: 'http://prometheus:9090/api/v1/query',
+      queryParams: 'query=up'
+    };
+    const HISTORY_PAGE_SIZE = 20;
+    let historyPage = 0;
+    const QUEUE_PAGE_SIZE = 20;
+    let queuePage = 0;
+    // Если backend вернул старый формат (массив всех записей), держим локальный кеш
+    // и листаем страницы без повторных сетевых запросов.
+    let historyLegacyCache = null;
+    let metricsConfigSchema = null;
+    let metricsConfigUiInitialized = false;
+
+    (function initMetricsSchemaLink() {
+      const a = document.getElementById('metricsSchemaLink');
+      if (a) a.href = API + '/metrics-config-schema';
+    })();
+
+    async function fetchMetricsConfigSchema() {
+      if (metricsConfigSchema) return metricsConfigSchema;
+      const r = await fetch(API + '/metrics-config-schema');
+      if (!r.ok) throw new Error('Не удалось загрузить JSON Schema метрик (HTTP ' + r.status + ')');
+      metricsConfigSchema = await r.json();
+      return metricsConfigSchema;
+    }
+
+    function metricsQueryParamsToString(qp) {
+      if (qp == null || qp === '') return '';
+      if (typeof qp === 'object') return JSON.stringify(qp);
+      return String(qp);
+    }
+
+    function appendMetricsRequestCard(initial) {
+      const list = document.getElementById('metricsRequestsList');
+      const art = document.createElement('article');
+      art.className = 'metrics-req-card';
+      const sel = METRICS_HTTP_METHODS.map(function (m) {
+        const selAttr = (initial.method || 'GET').toUpperCase() === m ? ' selected' : '';
+        return '<option value="' + m + '"' + selAttr + '>' + m + '</option>';
+      }).join('');
+      art.innerHTML =
+        '<header class="metrics-req-card-head">' +
+        '  <p class="metrics-req-card-title">Запрос</p>' +
+        '  <button type="button" class="btn btn-secondary btn-small metrics-req-remove">Удалить</button>' +
+        '</header>' +
+        '<div class="metrics-req-fields">' +
+        '  <div class="form-group">' +
+        '    <label>Имя в отчёте <span class="meta">(необязательно)</span></label>' +
+        '    <input type="text" class="metrics-in-name" placeholder="prometheus" autocomplete="off">' +
+        '  </div>' +
+        '  <div class="form-group">' +
+        '    <label>Метод</label>' +
+        '    <select class="metrics-in-method">' + sel + '</select>' +
+        '  </div>' +
+        '  <div class="form-group">' +
+        '    <label>URL <span class="meta">(обязательно)</span></label>' +
+        '    <input type="text" class="metrics-in-url" placeholder="http://prometheus:9090/api/v1/query" autocomplete="off">' +
+        '  </div>' +
+        '  <div class="form-group">' +
+        '    <label>Query</label>' +
+        '    <input type="text" class="metrics-in-query" placeholder="query=up или JSON-объект">' +
+        '    <span class="metrics-field-hint">Строка вида key=value&amp;… или JSON-объект с ключами (значения — строка/число/логическое).</span>' +
+        '  </div>' +
+        '  <div class="form-group">' +
+        '    <label>Заголовки <span class="meta">(необязательно, JSON)</span></label>' +
+        '    <textarea class="metrics-in-headers" rows="2" placeholder="{ }"></textarea>' +
+        '  </div>' +
+        '  <div class="form-group">' +
+        '    <label>Тело <span class="meta">(необязательно, для POST/PUT/PATCH)</span></label>' +
+        '    <textarea class="metrics-in-body" rows="3" placeholder="{ }"></textarea>' +
+        '  </div>' +
+        '</div>';
+      art.querySelector('.metrics-in-name').value = initial.name != null ? String(initial.name) : '';
+      art.querySelector('.metrics-in-url').value = initial.url != null ? String(initial.url) : '';
+      art.querySelector('.metrics-in-query').value = metricsQueryParamsToString(initial.queryParams);
+      art.querySelector('.metrics-in-headers').value = initial.headers && typeof initial.headers === 'object'
+        ? JSON.stringify(initial.headers, null, 2) : '';
+      if (initial.body !== undefined && initial.body !== null && initial.body !== '') {
+        art.querySelector('.metrics-in-body').value = typeof initial.body === 'object'
+          ? JSON.stringify(initial.body, null, 2) : String(initial.body);
+      }
+      list.appendChild(art);
+    }
+
+    function renumberMetricsRequestCards() {
+      const list = document.getElementById('metricsRequestsList');
+      const cards = list.querySelectorAll('.metrics-req-card');
+      cards.forEach(function (card, i) {
+        const t = card.querySelector('.metrics-req-card-title');
+        if (t) t.textContent = 'Запрос ' + (i + 1);
+      });
+      const onlyOne = cards.length <= 1;
+      list.querySelectorAll('.metrics-req-remove').forEach(function (b) {
+        b.disabled = onlyOne;
+        b.style.opacity = onlyOne ? '0.45' : '';
+        b.title = onlyOne ? 'Нужен хотя бы один запрос' : '';
+      });
+    }
+
+    function initMetricsConfigUiOnce() {
+      if (metricsConfigUiInitialized) return;
+      const list = document.getElementById('metricsRequestsList');
+      list.innerHTML = '';
+      appendMetricsRequestCard(METRICS_DEFAULT_REQUEST);
+      renumberMetricsRequestCards();
+      metricsConfigUiInitialized = true;
+    }
+
+    document.getElementById('metricsRequestsList').addEventListener('click', function (e) {
+      if (!e.target.closest('.metrics-req-remove')) return;
+      const cards = this.querySelectorAll('.metrics-req-card');
+      if (cards.length <= 1) return;
+      e.target.closest('.metrics-req-card').remove();
+      renumberMetricsRequestCards();
+    });
+
+    document.getElementById('metricsAddRequest').addEventListener('click', function () {
+      if (!document.getElementById('metricsConfigEnabled').checked) return;
+      appendMetricsRequestCard({ method: 'GET', url: '', name: '' });
+      renumberMetricsRequestCards();
+    });
+
+    function serializeMetricsConfig() {
+      const errors = [];
+      const delayEl = document.getElementById('metricsDelaySeconds');
+      let delaySeconds = parseInt(delayEl.value, 10);
+      if (!Number.isFinite(delaySeconds) || delaySeconds < 0) delaySeconds = 0;
+      const requests = [];
+      document.querySelectorAll('#metricsRequestsList .metrics-req-card').forEach(function (card, i) {
+        const n = i + 1;
+        const url = card.querySelector('.metrics-in-url').value.trim();
+        const name = card.querySelector('.metrics-in-name').value.trim();
+        const method = (card.querySelector('.metrics-in-method').value || 'GET').trim().toUpperCase();
+        const qRaw = card.querySelector('.metrics-in-query').value.trim();
+        const hRaw = card.querySelector('.metrics-in-headers').value.trim();
+        const bRaw = card.querySelector('.metrics-in-body').value.trim();
+        if (!url) errors.push('Запрос ' + n + ': укажите URL');
+        if (METRICS_HTTP_METHODS.indexOf(method) < 0) errors.push('Запрос ' + n + ': недопустимый метод HTTP');
+        const req = { url: url, method: method };
+        if (name) req.name = name;
+        if (qRaw) {
+          if (qRaw.startsWith('{')) {
+            try {
+              req.queryParams = JSON.parse(qRaw);
+            } catch (_) {
+              errors.push('Запрос ' + n + ': поле Query — неверный JSON');
+            }
+          } else {
+            req.queryParams = qRaw;
+          }
+        }
+        if (hRaw) {
+          try {
+            const o = JSON.parse(hRaw);
+            if (typeof o !== 'object' || o === null || Array.isArray(o)) {
+              errors.push('Запрос ' + n + ': заголовки должны быть JSON-объектом');
+            } else {
+              req.headers = o;
+            }
+          } catch (_) {
+            errors.push('Запрос ' + n + ': заголовки — неверный JSON');
+          }
+        }
+        if (bRaw) {
+          try {
+            req.body = JSON.parse(bRaw);
+          } catch (_) {
+            req.body = bRaw;
+          }
+        }
+        requests.push(req);
+      });
+      return { errors: errors, data: { delaySeconds: delaySeconds, requests: requests } };
+    }
+
+    document.getElementById('metricsConfigEnabled').addEventListener('change', function () {
+      const wrap = document.getElementById('metricsConfigEditorWrap');
+      const msgEl = document.getElementById('runMsg');
+      if (this.checked) {
+        wrap.style.display = 'block';
+        msgEl.innerHTML = '';
+        initMetricsConfigUiOnce();
+        fetchMetricsConfigSchema().catch(function () { /* ссылка на схему всё равно ведёт на API */ });
+      } else {
+        wrap.style.display = 'none';
+      }
+    });
+
+    document.getElementById('metricsConfigRawToggle').addEventListener('click', function () {
+      const ta = document.getElementById('metricsConfigRaw');
+      if (!metricsConfigUiInitialized) return;
+      const show = ta.style.display === 'none';
+      if (show) {
+        const pack = serializeMetricsConfig();
+        ta.value = pack.errors.length
+          ? '// Исправьте: ' + pack.errors.join(' ') + '\n' + JSON.stringify(pack.data, null, 2)
+          : JSON.stringify(pack.data, null, 2);
+        this.textContent = 'Скрыть JSON';
+      } else {
+        this.textContent = 'Посмотреть итоговый JSON';
+      }
+      ta.style.display = show ? 'block' : 'none';
+    });
+
+    /** Имя маршрута → OPENAI | EXTERNAL (из GET /summarizers, все записи). */
+    let summarizerProviderByName = new Map();
+    let editingSummarizerId = null;
+
+    async function refreshSummarizerProviderMap() {
+      summarizerProviderByName = new Map();
+      try {
+        const r = await fetch(API + '/summarizers');
+        const j = await r.json();
+        if (j.status === 'error') return;
+        const list = j.data != null ? (Array.isArray(j.data) ? j.data : (j.data.data || [])) : [];
+        list.forEach(s => {
+          if (s && s.name) summarizerProviderByName.set(String(s.name), String(s.provider || 'OPENAI').toUpperCase());
+        });
+      } catch (_) { /* ignore */ }
+    }
+
+    function summarizerSelectLabel(s) {
+      const p = String(s.provider || 'OPENAI').toUpperCase();
+      const hint = p === 'EXTERNAL' ? 'внешний контур (без LiteLLM)' : 'через summarization-service (часто LiteLLM)';
+      return s.name + ' — ' + p + ' · ' + hint;
+    }
+
+    function summarizerRouteBadgeHtml(summarizerName) {
+      if (!summarizerName) return '';
+      const p = summarizerProviderByName.get(summarizerName);
+      if (p === 'EXTERNAL') {
+        return ' <span class="meta" title="Не идёт в LiteLLM: пакет наружу и callback summary">[EXTERNAL]</span>';
+      }
+      if (p) {
+        return ' <span class="meta" title="Идёт в summarization-service → POST …/v1/chat/completions (у вас обычно LiteLLM)">[LiteLLM]</span>';
+      }
+      return '';
+    }
+
+    function applySummarizerFormProviderUi() {
+      const form = document.getElementById('summarizerForm');
+      if (!form || !form.provider) return;
+      const pv = form.provider.value;
+      const hasProvider = pv === 'OPENAI' || pv === 'EXTERNAL';
+      const ext = pv === 'EXTERNAL';
+      const wrap = document.getElementById('summarizerProviderSpecificFields');
+      if (wrap) wrap.style.display = hasProvider ? '' : 'none';
+      const submitBtn = document.getElementById('summarizerFormSubmit');
+      if (submitBtn) {
+        submitBtn.disabled = !editingSummarizerId && !hasProvider;
+      }
+      if (!hasProvider) return;
+      const baseLbl = document.getElementById('summarizerBaseUrlLabel');
+      const baseInp = document.getElementById('summarizerBaseUrlInput');
+      const modelLbl = document.getElementById('summarizerModelIdLabel');
+      const modelRow = document.getElementById('summarizerModelIdRow');
+      const apiKeyRow = document.getElementById('summarizerApiKeyRow');
+      if (baseLbl) {
+        baseLbl.textContent = ext
+          ? 'Полный URL приёма пакета (ingest), POST JSON — куда app-module отправит метрики и артефакты'
+          : 'Base URL (LiteLLM / OpenAI — без суффикса /v1/...)';
+      }
+      if (baseInp) {
+        baseInp.placeholder = ext ? 'https://your-gw.example.com/loadtest/ingest' : 'http://localhost:4000';
+      }
+      if (modelLbl) {
+        modelLbl.textContent = ext ? 'Метка модели (опционально, по умолчанию external)' : 'Model ID (имя модели)';
+      }
+      if (modelRow) modelRow.style.display = '';
+      if (apiKeyRow) apiKeyRow.style.display = ext ? 'none' : '';
+    }
+
+    function partitionSummarizersByProvider(list) {
+      const llm = [];
+      const ext = [];
+      (list || []).forEach(s => {
+        if (!s || !s.name) return;
+        if (String(s.provider || 'OPENAI').toUpperCase() === 'EXTERNAL') {
+          ext.push(s);
+        } else {
+          llm.push(s);
+        }
+      });
+      return { llm, ext };
+    }
+
+    function summarizerOptionsInnerHtml(list) {
+      const { llm, ext } = partitionSummarizersByProvider(list);
+      let h = '';
+      if (llm.length) {
+        h += '<optgroup label="Через summarization-service (LiteLLM и др.)">';
+        h += llm.map(s => `<option value="${escapeAttr(s.name)}">${escapeHtml(summarizerSelectLabel(s))}</option>`).join('');
+        h += '</optgroup>';
+      }
+      if (ext.length) {
+        h += '<optgroup label="Внешний контур (без LiteLLM)">';
+        h += ext.map(s => `<option value="${escapeAttr(s.name)}">${escapeHtml(summarizerSelectLabel(s))}</option>`).join('');
+        h += '</optgroup>';
+      }
+      return h;
+    }
+
+    async function loadDockerProfilesForRun() {
+      const sel = document.getElementById('dockerProfileSelect');
+      if (!sel) return;
+      try {
+        const r = await fetch(API + '/docker-profiles?enabledOnly=true');
+        const j = await r.json();
+        if (j.status === 'error') throw new Error(j.message || 'profiles');
+        const list = j.profiles || [];
+        sel.innerHTML = '';
+        list.forEach(function (p) {
+          const o = document.createElement('option');
+          o.value = p.id;
+          o.textContent = p.name + ' (до ' + p.maxConcurrentContainers + ' параллельно)';
+          sel.appendChild(o);
+        });
+        if (!sel.options.length) {
+          sel.innerHTML = '<option value="">— нет включённых профилей —</option>';
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function fillSummarizerSelectOptgroups(selectEl, list) {
+      selectEl.innerHTML = '<option value="">— как в этом прогоне —</option>';
+      const { llm, ext } = partitionSummarizersByProvider(list);
+      if (llm.length) {
+        const og = document.createElement('optgroup');
+        og.label = 'Через summarization-service (LiteLLM и др.)';
+        llm.forEach(s => og.appendChild(new Option(summarizerSelectLabel(s), s.name)));
+        selectEl.appendChild(og);
+      }
+      if (ext.length) {
+        const og = document.createElement('optgroup');
+        og.label = 'Внешний контур (без LiteLLM)';
+        ext.forEach(s => og.appendChild(new Option(summarizerSelectLabel(s), s.name)));
+        selectEl.appendChild(og);
+      }
+    }
+
+    function showTab(id) {
+      document.querySelectorAll('section').forEach(s => s.classList.remove('visible'));
+      document.querySelectorAll('nav button[data-tab]').forEach(b => b.classList.remove('active'));
+      document.getElementById(id).classList.add('visible');
+      const tabBtn = document.querySelector(`nav button[data-tab="${id}"]`);
+      if (tabBtn) tabBtn.classList.add('active');
+      if (id === 'queue') loadQueue();
+      if (id === 'history') {
+        handleHistoryHash();
+        const h = location.hash.replace(/^#/, '');
+        if (!/^history\/[0-9a-fA-F-]{36}$/.test(h)) {
+          loadHistory();
+        }
+      }
+      if (id === 'run') loadDockerProfilesForRun();
+      if (id === 'config') showConfigSubtab('tools');
+    }
+
+    function showConfigSubtab(subId) {
+      document.querySelectorAll('.config-panel').forEach(p => p.classList.remove('visible'));
+      document.querySelectorAll('.subnav button').forEach(b => b.classList.remove('active'));
+      const panel = document.getElementById('config-' + subId);
+      const btn = document.querySelector(`.subnav button[data-subtab="${subId}"]`);
+      if (panel) panel.classList.add('visible');
+      if (btn) btn.classList.add('active');
+      if (subId === 'tools') loadToolsList();
+      if (subId === 'summarizers') loadSummarizersList();
+      if (subId === 'docker') loadDocker();
+    }
+
+    document.querySelectorAll('nav button[data-tab]').forEach(btn => {
+      btn.addEventListener('click', () => showTab(btn.dataset.tab));
+    });
+    document.querySelectorAll('.subnav button[data-subtab]').forEach(btn => {
+      btn.addEventListener('click', () => showConfigSubtab(btn.dataset.subtab));
+    });
+
+    async function loadQueuePauseUi() {
+      const label = document.getElementById('queuePauseLabel');
+      const btn = document.getElementById('queuePauseToggle');
+      try {
+        const r = await fetch(API + '/queue/pause');
+        let j = {};
+        try { j = await r.json(); } catch (_) { /* не JSON (например 404 HTML) */ }
+        if (!r.ok) {
+          const hint = r.status === 404
+            ? ' Эндпоинт не найден: пересоберите и перезапустите app-module (образ loadtest-app).'
+            : '';
+          throw new Error((j.message || ('HTTP ' + r.status)) + hint);
+        }
+        const paused = !!j.paused;
+        const n = j.pendingKafkaDispatchCount != null ? j.pendingKafkaDispatchCount : 0;
+        label.textContent = paused
+          ? 'Пауза очереди включена: задачи сохраняются в БД, в Kafka не уходят. Ожидают отправки после снятия паузы: ' + n + '. В этом режиме можно править конфигурацию Docker при непустой очереди.'
+          : 'Пауза выключена: после сохранения в БД задача сразу ставится в Kafka (через outbox).';
+        btn.textContent = paused ? 'Снять паузу очереди' : 'Поставить очередь на паузу';
+        btn.dataset.paused = paused ? '1' : '0';
+      } catch (e) {
+        label.textContent = 'Состояние паузы: ошибка загрузки — ' + (e.message || String(e));
+      }
+    }
+
+    async function toggleQueuePause() {
+      const btn = document.getElementById('queuePauseToggle');
+      const cur = btn.dataset.paused === '1';
+      try {
+        const r = await fetch(API + '/queue/pause', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paused: !cur })
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          alert(j.message || ('Ошибка ' + r.status));
+          return;
+        }
+        await loadQueuePauseUi();
+        await loadQueue();
+      } catch (e) {
+        alert(e.message || String(e));
+      }
+    }
+
+    async function loadQueue() {
+      const el = document.getElementById('queueTable');
+      const pageInfoEl = document.getElementById('queuePageInfo');
+      const prevBtn = document.getElementById('queuePrevPage');
+      const nextBtn = document.getElementById('queueNextPage');
+      try {
+        await loadQueuePauseUi();
+        await refreshSummarizerProviderMap();
+        const r = await fetch(API + '/tasks?page=' + queuePage + '&size=' + QUEUE_PAGE_SIZE);
+        if (!r.ok) {
+          throw new Error('HTTP ' + r.status);
+        }
+        const payload = await r.json();
+        const tasks = Array.isArray(payload?.items) ? payload.items : [];
+        const totalPages = Number.isFinite(payload?.totalPages) ? payload.totalPages : 0;
+        const totalElements = Number.isFinite(payload?.totalElements) ? payload.totalElements : tasks.length;
+        const currentPage = Number.isFinite(payload?.page) ? payload.page : queuePage;
+        if (pageInfoEl) {
+          const safeTotalPages = totalPages > 0 ? totalPages : 1;
+          pageInfoEl.textContent = 'Страница ' + (currentPage + 1) + ' из ' + safeTotalPages + ' (' + totalElements + ' задач)';
+        }
+        if (prevBtn) prevBtn.disabled = currentPage <= 0;
+        if (nextBtn) nextBtn.disabled = totalPages <= 0 || currentPage >= (totalPages - 1);
+        if (!tasks.length) {
+          el.innerHTML = '<p class="meta">Очередь пуста</p>';
+          return;
+        }
+        el.innerHTML = `
+          <table>
+            <thead><tr><th>ID</th><th>Статус</th><th>Инструмент</th><th>Файл</th><th>Docker</th><th>Маршрут LLM</th><th>Создан</th><th></th></tr></thead>
+            <tbody>
+              ${tasks.map(t => `
+                <tr>
+                  <td><code>${t.id}</code></td>
+                  <td>${t.status}</td>
+                  <td>${t.testTool}</td>
+                  <td>${t.testFileName}</td>
+                  <td class="meta">${t.dockerProfileName ? escapeHtml(t.dockerProfileName) : '—'}</td>
+                  <td class="meta">${t.summarizerName ? escapeHtml(t.summarizerName) + summarizerRouteBadgeHtml(t.summarizerName) : '—'}</td>
+                  <td class="meta">${formatDate(t.createdAt)}</td>
+                  <td class="actions-cell">${t.status === 'PENDING' ? '<button type="button" class="btn btn-small btn-danger btn-delete-queue" data-task-id="' + escapeHtml(t.id) + '">Удалить</button>' : '<span class="meta">—</span>'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>`;
+        el.querySelectorAll('.btn-delete-queue').forEach(btn => {
+          btn.addEventListener('click', async function (ev) {
+            ev.preventDefault();
+            const id = this.getAttribute('data-task-id');
+            if (!id || !confirm('Удалить задачу из очереди? Её уже нельзя будет запустить из этого места.')) return;
+            try {
+              const r = await fetch(API + '/tasks/' + id, { method: 'DELETE' });
+              const data = r.ok ? await r.json().catch(() => ({})) : await r.json().catch(() => ({}));
+              if (r.ok) {
+                if (tasks.length === 1 && queuePage > 0) queuePage -= 1;
+                loadQueue();
+              } else {
+                alert(data.message || ('Ошибка ' + r.status));
+              }
+            } catch (err) {
+              alert(err.message || String(err));
+            }
+          });
+        });
+      } catch (e) {
+        el.innerHTML = '<p class="msg err">Ошибка: ' + e.message + '</p>';
+      }
+    }
+
+    async function loadHistory(forceReload = false) {
+      const el = document.getElementById('historyTable');
+      const pageInfoEl = document.getElementById('historyPageInfo');
+      const prevBtn = document.getElementById('historyPrevPage');
+      const nextBtn = document.getElementById('historyNextPage');
+      try {
+        await refreshSummarizerProviderMap();
+        let payload = null;
+        let backendPaged = false;
+        let rawList = [];
+
+        const shouldUseLegacyCache = !forceReload && Array.isArray(historyLegacyCache);
+        if (shouldUseLegacyCache) {
+          rawList = historyLegacyCache;
+        } else {
+          const r = await fetch(API + '/history?page=' + historyPage + '&size=' + HISTORY_PAGE_SIZE);
+          if (!r.ok) {
+            throw new Error('HTTP ' + r.status);
+          }
+          payload = await r.json();
+          // Совместимость с обоими форматами:
+          // 1) новый: { items, page, size, totalElements, totalPages }
+          // 2) старый: [ ...historyItems ] (без пагинации на бэке)
+          backendPaged = !Array.isArray(payload) && Array.isArray(payload?.items);
+          rawList =
+            Array.isArray(payload?.items) ? payload.items :
+            Array.isArray(payload?.data) ? payload.data :
+            Array.isArray(payload) ? payload : [];
+
+          // Если backend отдал старый формат — сохраняем кеш целиком.
+          historyLegacyCache = backendPaged ? null : rawList;
+        }
+
+        let list = rawList;
+        let totalElements = Number.isFinite(payload?.totalElements) ? payload.totalElements : rawList.length;
+        let totalPages = Number.isFinite(payload?.totalPages) ? payload.totalPages : 0;
+        let currentPage = Number.isFinite(payload?.page) ? payload.page : historyPage;
+
+        if (!backendPaged) {
+          const start = Math.max(0, historyPage) * HISTORY_PAGE_SIZE;
+          const end = start + HISTORY_PAGE_SIZE;
+          list = rawList.slice(start, end);
+          totalPages = Math.max(1, Math.ceil(rawList.length / HISTORY_PAGE_SIZE));
+          totalElements = rawList.length;
+          currentPage = Math.max(0, historyPage);
+        }
+
+        if (pageInfoEl) {
+          const safeTotalPages = totalPages > 0 ? totalPages : 1;
+          pageInfoEl.textContent = 'Страница ' + (currentPage + 1) + ' из ' + safeTotalPages + ' (' + totalElements + ' прогонов)';
+        }
+        if (prevBtn) prevBtn.disabled = currentPage <= 0;
+        if (nextBtn) nextBtn.disabled = totalPages <= 0 || currentPage >= (totalPages - 1);
+
+        if (!list.length) {
+          el.innerHTML = '<p class="meta">История пуста</p>';
+          return;
+        }
+        function truncateCmd(cmd) {
+          if (!cmd) return '—';
+          return cmd.length > 60 ? cmd.slice(0, 57) + '…' : cmd;
+        }
+        function esc(s) {
+          if (!s) return '';
+          const d = document.createElement('div');
+          d.textContent = s;
+          return d.innerHTML;
+        }
+        const rows = list.map(t => {
+          const taskId = t.id;
+          return `
+            <tr class="history-row" data-task-id="${taskId}" style="cursor:pointer">
+              <td>${esc(t.finalStatus)}</td>
+              <td>${esc(t.testTool)}</td>
+              <td>${esc(t.testFileName)}</td>
+              <td class="meta">${t.dockerProfileName ? esc(t.dockerProfileName) : '—'}</td>
+              <td class="meta">${t.summarizerName ? esc(t.summarizerName) + summarizerRouteBadgeHtml(t.summarizerName) : '—'}</td>
+              <td class="meta" title="${esc(t.command || '')}">${truncateCmd(t.command)}</td>
+              <td>${t.metricsCollected ? 'да' : 'нет'}</td>
+              <td class="meta">${formatDate(t.createdAt)}</td>
+              <td class="meta">${formatDate(t.finishedAt)}</td>
+              <td class="actions-cell"><button type="button" class="btn btn-small btn-danger btn-delete-history" data-task-id="${taskId}">Удалить</button></td>
+            </tr>`;
+        }).join('');
+        el.innerHTML = `<table><thead><tr><th>Статус</th><th>Инструмент</th><th>Файл</th><th>Docker</th><th>Маршрут LLM</th><th>Команда</th><th>Метрики</th><th>Создан</th><th>Завершён</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+        el.querySelectorAll('.history-row').forEach(tr => {
+          tr.addEventListener('click', (ev) => {
+            if (ev.target.closest && ev.target.closest('button.btn-delete-history')) return;
+            location.hash = 'history/' + tr.dataset.taskId;
+          });
+        });
+        el.querySelectorAll('.btn-delete-history').forEach(btn => {
+          btn.addEventListener('click', async function (ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            const id = this.getAttribute('data-task-id');
+            if (!id || !confirm('Удалить этот прогон из истории? Артефакты, метрики и отчёты LLM будут удалены безвозвратно.')) return;
+            try {
+              const r = await fetch(API + '/history/' + id, { method: 'DELETE' });
+              if (r.status === 204 || r.ok) {
+                historyLegacyCache = null;
+                loadHistory(true);
+              } else {
+                const data = await r.json().catch(() => ({}));
+                alert(data.message || ('Ошибка ' + r.status));
+              }
+            } catch (err) {
+              alert(err.message || String(err));
+            }
+          });
+        });
+      } catch (e) {
+        el.innerHTML = '<p class="msg err">Ошибка: ' + e.message + '</p>';
+      }
+    }
+
+    function parseSummarySections(text) {
+      if (!text || typeof text !== 'string') return [];
+      const sections = [];
+      const parts = text.split(/(?=^## .+$)/gm);
+      for (const p of parts) {
+        const m = p.match(/^##\s+(.+?)$/m);
+        if (m) {
+          let title = m[1].trim();
+          let body = p.replace(/^##\s+.+?\n?/m, '').trim();
+          const truncated = title.length > 1 ? title.substring(1) : '';
+          if (truncated && body.startsWith(truncated)) {
+            body = body.substring(truncated.length).replace(/^\s*\n+/, '').trim();
+          }
+          sections.push({ title: title, body: body });
+        } else if (p.trim()) {
+          sections.push({ title: null, body: p.trim() });
+        }
+      }
+      if (sections.length === 0 && text.trim()) sections.push({ title: null, body: text.trim() });
+      return sections;
+    }
+
+    function renderSummaryBody(body) {
+      const lines = (body || '').split('\n');
+      return lines.map(function (line) {
+        const sub = line.match(/^###\s+(.+)$/);
+        if (sub) return '<h4 class="summary-subtitle">' + escapeHtml(sub[1]) + '</h4>';
+        return escapeHtml(line) + '<br>';
+      }).join('');
+    }
+
+    async function postHistoryRerun(taskId, summarizerSelectEl) {
+      const summarizer = summarizerSelectEl && summarizerSelectEl.value ? summarizerSelectEl.value.trim() : '';
+      const payload = summarizer ? JSON.stringify({ summarizer }) : '{}';
+      const r = await fetch(API + '/history/' + taskId + '/rerun', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload
+      });
+      let data = {};
+      try {
+        data = await r.json();
+      } catch (_) { /* не JSON или пусто */ }
+      return { r, data };
+    }
+
+    function applyHistorySummarizerSelectDefault(selectEl, defaultName) {
+      if (!selectEl || defaultName == null || String(defaultName).trim() === '') return;
+      const v = String(defaultName).trim();
+      for (let i = 0; i < selectEl.options.length; i++) {
+        if (selectEl.options[i].value === v) {
+          selectEl.value = v;
+          return;
+        }
+      }
+    }
+
+    async function loadAndRenderHistoryDetail(taskId) {
+      const container = document.getElementById('historyDetailContent');
+      if (!container) return;
+      container.innerHTML = '<p class="meta">Загрузка…</p>';
+      try {
+        const [histR, artR, metricsR, summaryR] = await Promise.all([
+          fetch(API + '/history/' + taskId),
+          fetch(API + '/artifacts/' + taskId),
+          fetch(API + '/metrics/' + taskId),
+          fetch(API + '/history/' + taskId + '/summary')
+        ]);
+        const hist = histR.ok ? await histR.json() : {};
+        const artifacts = artR.ok ? await artR.json() : [];
+        const metricsList = metricsR.ok ? await metricsR.json() : [];
+        const summaryList = summaryR.ok ? await summaryR.json() : [];
+        const cmd = hist.command || '—';
+        const fileName = hist.testFileName || '—';
+        const fileContent = hist.fileContent != null ? hist.fileContent : '—';
+        let metricsConfigStr = '—';
+        if (hist.metricsConfig != null && hist.metricsConfig !== '') {
+          try {
+            metricsConfigStr = typeof hist.metricsConfig === 'string' ? JSON.stringify(JSON.parse(hist.metricsConfig), null, 2) : JSON.stringify(hist.metricsConfig, null, 2);
+          } catch (_) {
+            metricsConfigStr = hist.metricsConfig;
+          }
+        }
+        const artHtml = artifacts.length
+          ? '<ul class="artifacts-list">' + artifacts.map(a => {
+              const url = API + '/artifacts/' + taskId + '/files/' + encodeURIComponent(a.fileName);
+              const size = a.originalSizeBytes != null ? ' (' + a.originalSizeBytes + ' B)' : '';
+              return '<li><a href="' + url + '" target="_blank" rel="noopener">' + escapeHtml(a.fileName) + '</a>' + size + '</li>';
+            }).join('') + '</ul>'
+          : '<p class="meta">Нет артефактов</p>';
+        const metricsHtml = metricsList.length
+          ? metricsList.map(m => {
+              const dataStr = m.metricsData != null ? (typeof m.metricsData === 'string' ? m.metricsData : JSON.stringify(m.metricsData, null, 2)) : '—';
+              const collectedAt = m.collectedAt ? new Date(m.collectedAt).toLocaleString() : '—';
+              return '<div class="copy-block" style="margin-bottom:0.75rem"><strong>' + escapeHtml(m.sourceType || '—') + '</strong> <span class="meta">' + escapeHtml(m.endpointUrl || '') + ' ' + collectedAt + '</span><button type="button" class="btn-copy btn btn-small">Копировать</button><pre style="margin:0.5rem 0 0;max-height:8rem;overflow:auto">' + escapeHtml(dataStr) + '</pre></div>';
+            }).join('')
+          : '<p class="meta">Нет собранных метрик</p>';
+        let summaryBlockHtml = '';
+        const completedSummary = summaryList.find(s => isSummaryStatusCompleted(s.processingStatus) && s.summaryData != null);
+        if (completedSummary) {
+          const norm = normalizeSummaryPayload(completedSummary.summaryData);
+          const text = norm.text;
+          const meta = [norm.summarizerName, norm.model].filter(Boolean).join(' · ');
+          if (!text.trim()) {
+            summaryBlockHtml = '<div class="block-card summary-card"><h2 class="block-card-title">Отчёт суммаризации' + (meta ? ' <span class="meta">' + escapeHtml(meta) + '</span>' : '') + '</h2><div class="block-card-body"><p class="meta">Статус COMPLETED, но текст отчёта пустой или в неожиданном формате. Проверьте ответ API <code>/history/' + escapeHtml(taskId) + '/summary</code>.</p></div></div>';
+          } else {
+            const sections = parseSummarySections(text);
+            if (sections.length > 0) {
+              summaryBlockHtml = '<div class="block-card summary-card"><h2 class="block-card-title">Отчёт суммаризации' + (meta ? ' <span class="meta">' + escapeHtml(meta) + '</span>' : '') + '</h2><div class="block-card-body"><div class="summary-sections">' +
+                sections.map(sec => sec.title
+                  ? '<div class="summary-section"><h3 class="summary-section-title">' + escapeHtml(sec.title) + '</h3><div class="summary-section-body">' + renderSummaryBody(sec.body) + '</div></div>'
+                  : '<div class="summary-section"><div class="summary-section-body">' + renderSummaryBody(sec.body) + '</div></div>'
+                ).join('') + '</div></div></div>';
+            } else {
+              summaryBlockHtml = '<div class="block-card summary-card"><h2 class="block-card-title">Отчёт суммаризации' + (meta ? ' <span class="meta">' + escapeHtml(meta) + '</span>' : '') + '</h2><div class="block-card-body"><pre class="summary-section-body">' + escapeHtml(text) + '</pre></div></div>';
+            }
+          }
+        } else if (summaryList.some(s => isAwaitingExternalSummary(s.processingStatus))) {
+          const s = summaryList.find(x => isAwaitingExternalSummary(x.processingStatus));
+          const ext = parseExternalPendingData(s.summaryData);
+          const dlLine = ext.deadlineAt ? '<p class="meta"><strong>До:</strong> ' + escapeHtml(ext.deadlineAt) + '</p>' : '';
+          const api = '<p class="meta"><code>GET ' + escapeHtml(API) + '/history/' + escapeHtml(taskId) + '/external-llm/package</code><br><code>POST ' + escapeHtml(API) + '/history/' + escapeHtml(taskId) + '/external-llm/summary</code> с JSON <code>{"text":"…"}</code></p>';
+          summaryBlockHtml = '<div class="block-card summary-card"><h2 class="block-card-title">Внешняя LLM <span class="meta">AWAITING_EXTERNAL_CALLBACK</span></h2><div class="block-card-body"><p>Окно открыто: заберите метрики и артефакты, затем загрузите текст отчёта.</p>' + dlLine + (ext.instructionsRu ? '<p class="meta">' + escapeHtml(ext.instructionsRu) + '</p>' : '') + api + '</div></div>';
+        } else if (summaryList.length > 0) {
+          const s = summaryList[0];
+          const status = s.processingStatus || '—';
+          const err = s.errorMessage ? '<p class="msg err">' + escapeHtml(s.errorMessage) + '</p>' : '';
+          summaryBlockHtml = '<div class="block-card summary-card"><h2 class="block-card-title">Отчёт суммаризации <span class="meta">' + escapeHtml(status) + '</span></h2><div class="block-card-body">' + err + '<p class="meta">' + (status === 'PENDING' || status === 'PROCESSING' ? 'В обработке…' : 'Нет готового отчёта') + '</p></div></div>';
+        } else {
+          summaryBlockHtml = '<div class="block-card summary-card"><h2 class="block-card-title">Отчёт суммаризации</h2><div class="block-card-body"><p class="meta">Нет отчёта по этой задаче (LiteLLM или внешний маршрут).</p></div></div>';
+        }
+        const actionsBlockHtml = '<div class="block-card"><h2 class="block-card-title">Действия</h2><div class="block-card-body"><p class="meta" style="margin:0 0 0.5rem 0">Маршрут LLM для нового прогона и для «Перезапросить отчёт»:</p><select class="summarizer-select-detail" style="min-width:18rem;max-width:36rem;display:block;margin-bottom:0.75rem"><option value="">— как в этом прогоне —</option></select><button type="button" class="btn btn-rerun-detail" data-task-id="' + taskId + '">Перезапустить тест</button> <span class="rerun-detail-msg"></span><br><br><button type="button" class="btn btn-small btn-request-summarize-detail" data-task-id="' + taskId + '">Перезапросить отчёт</button> <span class="summarize-detail-msg" style="margin-left:0.5rem"></span><br><br><button type="button" class="btn btn-small btn-danger btn-delete-history-detail" data-task-id="' + taskId + '">Удалить прогон из истории</button> <span class="delete-history-detail-msg"></span></div></div>';
+        container.innerHTML =
+          '<div class="block-card"><h2 class="block-card-title">Прогон ' + escapeHtml(taskId) + '</h2><div class="block-card-body"><p><strong>Статус:</strong> ' + escapeHtml(hist.finalStatus || '—') + ' &nbsp; <strong>Инструмент:</strong> ' + escapeHtml(hist.testTool || '—') + ' &nbsp; <strong>Маршрут LLM:</strong> ' + (hist.summarizerName ? escapeHtml(hist.summarizerName) + summarizerRouteBadgeHtml(hist.summarizerName) : '—') + ' &nbsp; <strong>Создан:</strong> ' + formatDate(hist.createdAt) + ' &nbsp; <strong>Завершён:</strong> ' + formatDate(hist.finishedAt) + '</p></div></div>' +
+          actionsBlockHtml +
+          '<div class="block-card"><h2 class="block-card-title">Параметры запуска</h2><div class="block-card-body"><p><strong>Команда</strong></p><pre>' + escapeHtml(cmd) + '</pre><p style="margin-top:1rem"><strong>Файл теста</strong> ' + escapeHtml(fileName) + '</p><details style="margin-top:0.5rem"><summary>Содержимое файла</summary><pre style="margin-top:0.5rem">' + escapeHtml(fileContent) + '</pre></details><details style="margin-top:0.5rem"><summary>Конфиг метрик</summary><pre style="margin-top:0.5rem">' + escapeHtml(metricsConfigStr) + '</pre></details></div></div>' +
+          summaryBlockHtml +
+          '<div class="block-card"><h2 class="block-card-title">Артефакты</h2><div class="block-card-body">' + artHtml + '</div></div>' +
+          '<div class="block-card"><h2 class="block-card-title">Метрики</h2><div class="block-card-body">' + metricsHtml + '</div></div>';
+        container.querySelectorAll('.btn-copy').forEach(btn => {
+          btn.addEventListener('click', function () {
+            const block = this.closest('.copy-block');
+            const pre = block ? block.querySelector('pre') : null;
+            const text = pre ? pre.textContent : '';
+            if (!text) return;
+            navigator.clipboard.writeText(text).then(() => { this.textContent = 'Скопировано'; setTimeout(() => { this.textContent = 'Копировать'; }, 1500); }).catch(() => {});
+          });
+        });
+        const rerunBtn = container.querySelector('.btn-rerun-detail');
+        const rerunMsg = container.querySelector('.rerun-detail-msg');
+        if (rerunBtn && rerunMsg) {
+          rerunBtn.addEventListener('click', async function () {
+            const id = this.getAttribute('data-task-id');
+            if (!id) return;
+            this.disabled = true;
+            rerunMsg.textContent = '…';
+            rerunMsg.className = '';
+            try {
+              const sel = container.querySelector('.summarizer-select-detail');
+              const { r, data } = await postHistoryRerun(id, sel);
+              if (r.ok && data.taskId) {
+                rerunMsg.textContent = 'В очередь поставлена задача ' + data.taskId;
+                rerunMsg.className = 'msg ok';
+                loadQueue();
+              } else {
+                rerunMsg.textContent = 'Ошибка: ' + (data.message || r.status);
+                rerunMsg.className = 'msg err';
+              }
+            } catch (e) {
+              rerunMsg.textContent = 'Ошибка: ' + e.message;
+              rerunMsg.className = 'msg err';
+            }
+            this.disabled = false;
+          });
+        }
+        const summarizerSelectDetail = container.querySelector('.summarizer-select-detail');
+        if (summarizerSelectDetail) {
+          fetch(API + '/summarizers?enabled=true').then(async (r) => {
+            const res = await r.json();
+            const list = Array.isArray(res.data) ? res.data : (res.data && res.data.data ? res.data.data : []);
+            fillSummarizerSelectOptgroups(summarizerSelectDetail, list);
+            applyHistorySummarizerSelectDefault(summarizerSelectDetail, hist.summarizerName);
+          }).catch(() => {});
+        }
+        const summarizeBtn = container.querySelector('.btn-request-summarize-detail');
+        const summarizeMsg = container.querySelector('.summarize-detail-msg');
+        if (summarizeBtn && summarizeMsg) {
+          summarizeBtn.addEventListener('click', async function () {
+            const id = this.getAttribute('data-task-id');
+            if (!id) return;
+            const sel = container.querySelector('.summarizer-select-detail');
+            const body = sel && sel.value ? JSON.stringify({ summarizer: sel.value }) : '{}';
+            this.disabled = true;
+            summarizeMsg.textContent = '…';
+            summarizeMsg.className = '';
+            try {
+              const r = await fetch(API + '/history/' + id + '/summarize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body });
+              const data = r.ok ? await r.json() : {};
+              if (r.status === 202 && data.message) {
+                summarizeMsg.textContent = data.message;
+                summarizeMsg.className = 'msg ok';
+                setTimeout(() => { loadAndRenderHistoryDetail(id); }, 5000);
+              } else {
+                summarizeMsg.textContent = data.message || 'Ошибка ' + r.status;
+                summarizeMsg.className = 'msg err';
+              }
+            } catch (e) {
+              summarizeMsg.textContent = 'Ошибка: ' + e.message;
+              summarizeMsg.className = 'msg err';
+            }
+            this.disabled = false;
+          });
+        }
+        const deleteHistDetailBtn = container.querySelector('.btn-delete-history-detail');
+        const deleteHistDetailMsg = container.querySelector('.delete-history-detail-msg');
+        if (deleteHistDetailBtn && deleteHistDetailMsg) {
+          deleteHistDetailBtn.addEventListener('click', async function () {
+            const id = this.getAttribute('data-task-id');
+            if (!id || !confirm('Удалить этот прогон из истории? Артефакты, метрики и отчёты LLM будут удалены безвозвратно.')) return;
+            this.disabled = true;
+            deleteHistDetailMsg.textContent = '…';
+            deleteHistDetailMsg.className = '';
+            try {
+              const r = await fetch(API + '/history/' + id, { method: 'DELETE' });
+              if (r.status === 204 || r.ok) {
+                deleteHistDetailMsg.textContent = 'Удалено';
+                deleteHistDetailMsg.className = 'msg ok';
+                location.hash = 'history';
+                loadHistory();
+              } else {
+                const data = await r.json().catch(() => ({}));
+                deleteHistDetailMsg.textContent = data.message || ('Ошибка ' + r.status);
+                deleteHistDetailMsg.className = 'msg err';
+              }
+            } catch (e) {
+              deleteHistDetailMsg.textContent = 'Ошибка: ' + e.message;
+              deleteHistDetailMsg.className = 'msg err';
+            }
+            this.disabled = false;
+          });
+        }
+      } catch (e) {
+        container.innerHTML = '<p class="msg err">Ошибка: ' + escapeHtml(e.message) + '</p>';
+      }
+    }
+
+    function handleHistoryHash() {
+      const hash = location.hash.replace(/^#/, '') || '';
+      const listView = document.getElementById('historyListView');
+      const detailPage = document.getElementById('historyDetailPage');
+      if (!listView || !detailPage) return;
+      const match = hash.match(/^history\/([0-9a-fA-F-]{36})$/);
+      if (match) {
+        listView.style.display = 'none';
+        detailPage.style.display = 'block';
+        loadAndRenderHistoryDetail(match[1]);
+      } else {
+        listView.style.display = 'block';
+        detailPage.style.display = 'none';
+        if (hash === 'history') loadHistory();
+      }
+    }
+
+    const historyDetailBackEl = document.getElementById('historyDetailBack');
+    if (historyDetailBackEl) historyDetailBackEl.addEventListener('click', function (e) { e.preventDefault(); location.hash = 'history'; });
+    window.addEventListener('hashchange', handleHistoryHash);
+    (function initHistoryHash() {
+      const h = location.hash.replace(/^#/, '');
+      if (h.startsWith('history')) showTab('history');
+    })();
+
+    async function toggleHistoryDetail(taskId) {
+      const detailRow = document.querySelector(`tr.history-detail-row[data-detail-for="${taskId}"]`);
+      const mainRow = document.querySelector(`tr.history-row[data-task-id="${taskId}"]`);
+      const icon = mainRow && mainRow.querySelector('.expand-icon');
+      if (!detailRow) return;
+      const isHidden = detailRow.style.display === 'none';
+      if (isHidden) {
+        detailRow.style.display = 'table-row';
+        if (icon) icon.textContent = '▼';
+        const inner = detailRow.querySelector(`.history-detail-inner[data-detail-body="${taskId}"]`);
+        if (inner && inner.textContent.trim() === 'Загрузка…') {
+          try {
+            const [histR, artR, metricsR, summaryR] = await Promise.all([fetch(API + '/history/' + taskId), fetch(API + '/artifacts/' + taskId), fetch(API + '/metrics/' + taskId), fetch(API + '/history/' + taskId + '/summary')]);
+            const hist = histR.ok ? await histR.json() : {};
+            const artifacts = artR.ok ? await artR.json() : [];
+            const metricsList = metricsR.ok ? await metricsR.json() : [];
+            const summaryList = summaryR.ok ? await summaryR.json() : [];
+            const cmd = hist.command || '—';
+            const fileName = hist.testFileName || '—';
+            const fileContent = hist.fileContent != null ? hist.fileContent : '—';
+            let metricsConfigStr = '—';
+            if (hist.metricsConfig != null && hist.metricsConfig !== '') {
+              try {
+                metricsConfigStr = typeof hist.metricsConfig === 'string' ? JSON.stringify(JSON.parse(hist.metricsConfig), null, 2) : JSON.stringify(hist.metricsConfig, null, 2);
+              } catch (_) {
+                metricsConfigStr = hist.metricsConfig;
+              }
+            }
+            const artHtml = artifacts.length
+              ? artifacts.map(a => {
+                  const url = API + '/artifacts/' + taskId + '/files/' + encodeURIComponent(a.fileName);
+                  const size = a.originalSizeBytes != null ? ` (${a.originalSizeBytes} B)` : '';
+                  return `<li><a href="${url}" target="_blank" rel="noopener">${a.fileName}</a>${size}</li>`;
+                }).join('')
+              : '<li class="meta">Нет артефактов</li>';
+            const metricsHtml = metricsList.length
+              ? metricsList.map(m => {
+                  const dataStr = m.metricsData != null ? (typeof m.metricsData === 'string' ? m.metricsData : JSON.stringify(m.metricsData, null, 2)) : '—';
+                  const collectedAt = m.collectedAt ? new Date(m.collectedAt).toLocaleString() : '—';
+                  return `<li class="metrics-item copy-block"><strong>${escapeHtml(m.sourceType || '—')}</strong> <span class="meta">${escapeHtml(m.endpointUrl || '')}</span> <span class="meta">${collectedAt}</span><button type="button" class="btn-copy btn btn-small">Копировать</button><pre class="metrics-data">${escapeHtml(dataStr)}</pre></li>`;
+                }).join('')
+              : '<li class="meta">Нет собранных метрик</li>';
+            const summaryHtml = summaryList.length
+              ? summaryList.map(s => {
+                  const status = s.processingStatus || '—';
+                  const norm = normalizeSummaryPayload(s.summaryData);
+                  const text = norm.text.trim() ? norm.text : '';
+                  const meta = [norm.summarizerName, norm.model].filter(Boolean).join(' · ');
+                  const err = s.errorMessage ? `<p class="msg err">${escapeHtml(s.errorMessage)}</p>` : '';
+                  if (isSummaryStatusCompleted(status) && text) {
+                    return `<div class="copy-block summary-block"><h4>Отчёт суммаризации${meta ? ' <span class="meta">' + escapeHtml(meta) + '</span>' : ''}<button type="button" class="btn-copy btn btn-small">Копировать</button></h4>${err}<pre class="summary-text">${escapeHtml(text)}</pre></div>`;
+                  }
+                  if (isSummaryStatusCompleted(status) && !text) {
+                    return `<div class="copy-block summary-block"><h4>Отчёт суммаризации <span class="meta">${escapeHtml(meta || 'COMPLETED')}</span></h4>${err}<p class="meta">Отчёт без текста (проверьте формат summary_data).</p></div>`;
+                  }
+                  if (String(status).toUpperCase() === 'FAILED') {
+                    return `<div class="copy-block summary-block"><h4>Отчёт суммаризации <span class="meta">${escapeHtml(meta || status)}</span></h4>${err}<p class="meta">Ошибка обработки</p></div>`;
+                  }
+                  if (isAwaitingExternalSummary(status)) {
+                    const ext = parseExternalPendingData(s.summaryData);
+                    const dl = ext.deadlineAt ? `<p class="meta"><strong>До:</strong> ${escapeHtml(ext.deadlineAt)}</p>` : '';
+                    const api = `<p class="meta"><code>GET ${escapeHtml(API)}/history/${escapeHtml(taskId)}/external-llm/package</code><br><code>POST ${escapeHtml(API)}/history/${escapeHtml(taskId)}/external-llm/summary</code> JSON <code>{"text":"…"}</code></p>`;
+                    return `<div class="copy-block summary-block"><h4>Внешняя LLM <span class="meta">AWAITING_EXTERNAL_CALLBACK</span></h4>${ext.instructionsRu ? `<p class="meta">${escapeHtml(ext.instructionsRu)}</p>` : ''}${dl}${api}</div>`;
+                  }
+                  return `<div class="copy-block summary-block"><h4>Отчёт суммаризации <span class="meta">${escapeHtml(meta || status)}</span></h4><p class="meta">${status === 'PENDING' || status === 'PROCESSING' ? 'В обработке…' : status}</p></div>`;
+                }).join('')
+              : '<div class="meta">Нет отчёта по этой задаче</div>';
+            const summarySectionId = 'summary-section-' + taskId;
+            const summaryActionsId = 'summary-actions-' + taskId;
+            inner.innerHTML = `
+              <div class="history-detail-actions">
+                <p class="meta" style="margin:0 0 0.35rem 0">Маршрут LLM для перезапуска и перезапроса отчёта:</p>
+                <select class="summarizer-select-detail" style="min-width:18rem;max-width:36rem;display:block;margin-bottom:0.5rem"><option value="">— как в этом прогоне —</option></select>
+                <button type="button" class="btn btn-rerun" data-task-id="${taskId}">Перезапустить тест</button><span class="rerun-msg"></span>
+              </div>
+              <div class="copy-block"><h4>CLI-команда<button type="button" class="btn-copy btn btn-small">Копировать</button></h4><pre>${escapeHtml(cmd)}</pre></div>
+              <div class="copy-block"><h4>Файл теста<button type="button" class="btn-copy btn btn-small">Копировать</button></h4><pre>${escapeHtml(fileName)}</pre></div>
+              <div class="copy-block"><h4>Содержимое файла<button type="button" class="btn-copy btn btn-small">Копировать</button></h4><pre>${escapeHtml(fileContent)}</pre></div>
+              <div class="copy-block"><h4>Конфиг метрик<button type="button" class="btn-copy btn btn-small">Копировать</button></h4><pre>${escapeHtml(metricsConfigStr)}</pre></div>
+              <h4>Отчёт суммаризации <span class="meta">(LiteLLM через summarization-service или внешний маршрут)</span></h4>
+              <div id="${summarySectionId}" class="summary-section-wrap">${summaryHtml}</div>
+              <div id="${summaryActionsId}" class="summary-actions" style="margin-top:0.5rem;">
+                <button type="button" class="btn btn-small btn-request-summarize" data-task-id="${taskId}">Перезапросить отчёт</button>
+                <span class="summarize-msg" style="margin-left:0.5rem;"></span>
+              </div>
+              <h4>Артефакты</h4><ul class="artifacts-list">${artHtml}</ul>
+              <h4>Метрики</h4><ul class="artifacts-list metrics-list">${metricsHtml}</ul>`;
+            inner.querySelectorAll('.btn-copy').forEach(btn => {
+              btn.addEventListener('click', function () {
+                const block = this.closest('.copy-block, .metrics-item');
+                const pre = block ? block.querySelector('pre') : null;
+                const text = pre ? pre.textContent : '';
+                if (!text) return;
+                navigator.clipboard.writeText(text).then(() => {
+                  const lbl = this.textContent;
+                  this.textContent = 'Скопировано';
+                  setTimeout(() => { this.textContent = lbl; }, 1500);
+                }).catch(() => { this.textContent = 'Ошибка'; setTimeout(() => { this.textContent = 'Копировать'; }, 1500); });
+              });
+            });
+            const rerunBtn = inner.querySelector('.btn-rerun');
+            const rerunMsg = inner.querySelector('.rerun-msg');
+            if (rerunBtn && rerunMsg) {
+              rerunBtn.addEventListener('click', async function () {
+                const id = this.getAttribute('data-task-id');
+                if (!id) return;
+                this.disabled = true;
+                rerunMsg.textContent = '…';
+                rerunMsg.className = 'rerun-msg';
+                try {
+                  const sel = inner.querySelector('.summarizer-select-detail');
+                  const { r, data } = await postHistoryRerun(id, sel);
+                  if (r.ok && data.taskId) {
+                    rerunMsg.textContent = 'В очередь поставлена задача ' + data.taskId;
+                    rerunMsg.className = 'rerun-msg msg ok';
+                    loadQueue();
+                  } else {
+                    rerunMsg.textContent = 'Ошибка: ' + (data.message || r.status);
+                    rerunMsg.className = 'rerun-msg msg err';
+                  }
+                } catch (e) {
+                  rerunMsg.textContent = 'Ошибка: ' + e.message;
+                  rerunMsg.className = 'rerun-msg msg err';
+                }
+                this.disabled = false;
+              });
+            }
+            const summarizerSelectDetail = inner.querySelector('.summarizer-select-detail');
+            const summarizeBtn = inner.querySelector('.btn-request-summarize');
+            const summarizeMsg = inner.querySelector('.summarize-msg');
+            if (summarizerSelectDetail) {
+              fetch(API + '/summarizers?enabled=true').then(async (r) => {
+                const res = await r.json();
+                const list = Array.isArray(res.data) ? res.data : (res.data && res.data.data ? res.data.data : []);
+                fillSummarizerSelectOptgroups(summarizerSelectDetail, list);
+                applyHistorySummarizerSelectDefault(summarizerSelectDetail, hist.summarizerName);
+              }).catch(() => {});
+            }
+            function buildSummaryBlockHtml(summaryList) {
+              if (!summaryList || summaryList.length === 0) return '<div class="meta">Нет отчёта по этой задаче</div>';
+              return summaryList.map(s => {
+                const status = s.processingStatus || '—';
+                const norm = normalizeSummaryPayload(s.summaryData);
+                const text = norm.text.trim() ? norm.text : '';
+                const meta = [norm.summarizerName, norm.model].filter(Boolean).join(' · ');
+                const err = s.errorMessage ? '<p class="msg err">' + escapeHtml(s.errorMessage) + '</p>' : '';
+                if (isSummaryStatusCompleted(status) && text) {
+                  return '<div class="copy-block summary-block"><h4>Отчёт суммаризации' + (meta ? ' <span class="meta">' + escapeHtml(meta) + '</span>' : '') + '<button type="button" class="btn-copy btn btn-small">Копировать</button></h4>' + err + '<pre class="summary-text">' + escapeHtml(text) + '</pre></div>';
+                }
+                if (isSummaryStatusCompleted(status) && !text) {
+                  return '<div class="copy-block summary-block"><h4>Отчёт суммаризации <span class="meta">' + escapeHtml(meta || 'COMPLETED') + '</span></h4>' + err + '<p class="meta">Отчёт без текста.</p></div>';
+                }
+                if (String(status).toUpperCase() === 'FAILED') return '<div class="copy-block summary-block"><h4>Отчёт суммаризации <span class="meta">' + escapeHtml(meta || status) + '</span></h4>' + err + '<p class="meta">Ошибка обработки</p></div>';
+                if (isAwaitingExternalSummary(status)) {
+                  const ext = parseExternalPendingData(s.summaryData);
+                  const dl = ext.deadlineAt ? '<p class="meta"><strong>До:</strong> ' + escapeHtml(ext.deadlineAt) + '</p>' : '';
+                  const api = '<p class="meta"><code>GET ' + escapeHtml(API) + '/history/' + escapeHtml(taskId) + '/external-llm/package</code><br><code>POST ' + escapeHtml(API) + '/history/' + escapeHtml(taskId) + '/external-llm/summary</code> JSON <code>{"text":"…"}</code></p>';
+                  return '<div class="copy-block summary-block"><h4>Внешняя LLM <span class="meta">AWAITING_EXTERNAL_CALLBACK</span></h4>' + (ext.instructionsRu ? '<p class="meta">' + escapeHtml(ext.instructionsRu) + '</p>' : '') + dl + api + '</div>';
+                }
+                return '<div class="copy-block summary-block"><h4>Отчёт суммаризации <span class="meta">' + escapeHtml(meta || status) + '</span></h4><p class="meta">' + (status === 'PENDING' || status === 'PROCESSING' ? 'В обработке…' : status) + '</p></div>';
+              }).join('');
+            }
+            if (summarizeBtn && summarizeMsg) {
+              summarizeBtn.addEventListener('click', async function () {
+                const id = this.getAttribute('data-task-id');
+                if (!id) return;
+                const sel = inner.querySelector('.summarizer-select-detail');
+                const body = sel && sel.value ? JSON.stringify({ summarizer: sel.value }) : '{}';
+                this.disabled = true;
+                summarizeMsg.textContent = '…';
+                summarizeMsg.className = 'summarize-msg';
+                try {
+                  const r = await fetch(API + '/history/' + id + '/summarize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body });
+                  const data = r.ok ? await r.json() : {};
+                  if (r.status === 202 && data.message) {
+                    summarizeMsg.textContent = data.message;
+                    summarizeMsg.className = 'summarize-msg msg ok';
+                    const wrapId = summarySectionId;
+                    setTimeout(async () => {
+                      try {
+                        const sumR = await fetch(API + '/history/' + id + '/summary');
+                        const sumList = sumR.ok ? await sumR.json() : [];
+                        const wrap = document.getElementById(wrapId);
+                        if (wrap) {
+                          wrap.innerHTML = buildSummaryBlockHtml(sumList);
+                          wrap.querySelectorAll('.btn-copy').forEach(btn => {
+                            btn.addEventListener('click', function () {
+                              const block = this.closest('.copy-block');
+                              const pre = block ? block.querySelector('pre') : null;
+                              const text = pre ? pre.textContent : '';
+                              if (!text) return;
+                              navigator.clipboard.writeText(text).then(() => { this.textContent = 'Скопировано'; setTimeout(() => { this.textContent = 'Копировать'; }, 1500); }).catch(() => {});
+                            });
+                          });
+                        }
+                      } catch (e) { summarizeMsg.textContent = 'Обновление не удалось: ' + e.message; }
+                    }, 5000);
+                  } else {
+                    summarizeMsg.textContent = data.message || 'Ошибка ' + r.status;
+                    summarizeMsg.className = 'summarize-msg msg err';
+                  }
+                } catch (e) {
+                  summarizeMsg.textContent = 'Ошибка: ' + e.message;
+                  summarizeMsg.className = 'summarize-msg msg err';
+                }
+                this.disabled = false;
+              });
+            }
+          } catch (e) {
+            inner.innerHTML = '<span class="msg err">Ошибка: ' + escapeHtml(e.message) + '</span>';
+          }
+        }
+      } else {
+        detailRow.style.display = 'none';
+        if (icon) icon.textContent = '▶';
+      }
+    }
+
+    function formatDate(s) {
+      if (!s) return '—';
+      try {
+        const d = new Date(s);
+        return isNaN(d.getTime()) ? s : d.toLocaleString();
+      } catch (_) { return s; }
+    }
+
+    document.getElementById('refreshQueue').addEventListener('click', () => {
+      queuePage = 0;
+      loadQueue();
+    });
+    document.getElementById('queuePauseToggle').addEventListener('click', toggleQueuePause);
+    document.getElementById('queuePrevPage').addEventListener('click', () => {
+      if (queuePage <= 0) return;
+      queuePage -= 1;
+      loadQueue();
+    });
+    document.getElementById('queueNextPage').addEventListener('click', () => {
+      queuePage += 1;
+      loadQueue();
+    });
+    document.getElementById('refreshHistory').addEventListener('click', () => {
+      historyPage = 0;
+      historyLegacyCache = null;
+      loadHistory(true);
+    });
+    document.getElementById('historyPrevPage').addEventListener('click', () => {
+      if (historyPage <= 0) return;
+      historyPage -= 1;
+      loadHistory();
+    });
+    document.getElementById('historyNextPage').addEventListener('click', () => {
+      historyPage += 1;
+      loadHistory();
+    });
+
+    async function loadTools() {
+      try {
+        const r = await fetch(API + '/tools?enabled=true');
+        const res = await r.json();
+        const tools = Array.isArray(res.data) ? res.data : (res.data && res.data.data ? res.data.data : []);
+        const select = document.getElementById('toolSelect');
+        select.innerHTML = '<option value="">— выбрать —</option>' +
+          tools.map(t => `<option value="${t.name}">${t.name}</option>`).join('');
+      } catch (e) {
+        document.getElementById('toolSelect').innerHTML = '<option value="">Ошибка загрузки</option>';
+      }
+      loadSummarizers();
+    }
+
+    async function loadSummarizers() {
+      try {
+        await refreshSummarizerProviderMap();
+        const r = await fetch(API + '/summarizers?enabled=true');
+        const res = await r.json();
+        const list = Array.isArray(res.data) ? res.data : (res.data && res.data.data ? res.data.data : []);
+        const select = document.getElementById('summarizerSelect');
+        select.innerHTML = '<option value="">— без суммаризации —</option>' + summarizerOptionsInnerHtml(list);
+      } catch (e) {
+        document.getElementById('summarizerSelect').innerHTML = '<option value="">— без суммаризации —</option>';
+      }
+    }
+
+    loadTools();
+
+    async function loadToolsList() {
+      const el = document.getElementById('toolsTable');
+      try {
+        const r = await fetch(API + '/tools');
+        const j = await r.json();
+        if (j.status === 'error') throw new Error(j.message);
+        const tools = j.data != null ? (Array.isArray(j.data) ? j.data : j.data.data) : [];
+        if (!tools.length) {
+          el.innerHTML = '<p class="meta">Нет инструментов</p>';
+          return;
+        }
+        function esc(s) {
+          if (s == null) return '—';
+          const d = document.createElement('div');
+          d.textContent = String(s);
+          return d.innerHTML;
+        }
+        const rows = tools.map(t => {
+          const extStr = Array.isArray(t.fileExtensions) ? t.fileExtensions.join(', ') : (t.fileExtensions || '—');
+          return `
+            <tr class="tools-row" data-tool-id="${t.id}" style="cursor:pointer">
+              <td><span class="expand-icon" data-tool-id="${t.id}">▶</span></td>
+              <td><code>${esc(t.id)}</code></td>
+              <td>${esc(t.name)}</td>
+              <td>${esc(t.dockerImage)}</td>
+              <td>${esc(extStr)}</td>
+              <td>${t.enabled ? 'да' : 'нет'}</td>
+              <td class="meta">${formatDate(t.createdAt)}</td>
+              <td class="actions-cell">
+                <button type="button" class="btn btn-small tool-edit" data-tool-id="${t.id}">Изменить</button>
+                <button type="button" class="btn btn-small btn-danger tool-delete" data-tool-id="${t.id}">Удалить</button>
+              </td>
+            </tr>
+            <tr class="tools-detail-row" data-detail-for="${t.id}" style="display:none">
+              <td colspan="8"><div class="tools-detail-inner"><pre>${esc(JSON.stringify(t, null, 2))}</pre></div></td>
+            </tr>`;
+        }).join('');
+        el.innerHTML = `<table><thead><tr><th></th><th>ID</th><th>Имя</th><th>Docker образ</th><th>Расширения</th><th>Включён</th><th>Создан</th><th>Действия</th></tr></thead><tbody>${rows}</tbody></table>`;
+        el.querySelectorAll('.tools-row').forEach(tr => {
+          const toolId = tr.dataset.toolId;
+          tr.addEventListener('click', (e) => {
+            if (e.target.classList.contains('expand-icon')) return;
+            toggleToolsDetail(toolId);
+          });
+        });
+        el.querySelectorAll('.tools-row .expand-icon').forEach(span => {
+          span.addEventListener('click', (e) => { e.stopPropagation(); toggleToolsDetail(span.dataset.toolId); });
+        });
+        el.querySelectorAll('.tool-edit').forEach(btn => {
+          btn.addEventListener('click', (e) => { e.stopPropagation(); editTool(btn.dataset.toolId); });
+        });
+        el.querySelectorAll('.tool-delete').forEach(btn => {
+          btn.addEventListener('click', (e) => { e.stopPropagation(); deleteTool(btn.dataset.toolId); });
+        });
+      } catch (e) {
+        el.innerHTML = '<p class="msg err">Ошибка: ' + e.message + '</p>';
+      }
+    }
+
+    let editingToolId = null;
+    async function editTool(id) {
+      try {
+        const r = await fetch(API + '/tools/' + id);
+        const j = await r.json();
+        if (j.status === 'error' || !j.data) throw new Error(j.message || 'Не удалось загрузить инструмент');
+        const t = j.data;
+        const form = document.getElementById('toolForm');
+        form.name.value = t.name || '';
+        form.name.disabled = true;
+        form.dockerImage.value = t.dockerImage || '';
+        form.fileExtensions.value = Array.isArray(t.fileExtensions) ? t.fileExtensions.join(', ') : (t.fileExtensions || '');
+        form.enabled.checked = t.enabled !== false;
+        editingToolId = id;
+        document.getElementById('toolFormSubmit').textContent = 'Сохранить';
+        document.getElementById('toolFormCancel').style.display = 'inline-block';
+        document.getElementById('toolFormMsg').innerHTML = '';
+        form.scrollIntoView({ behavior: 'smooth' });
+      } catch (err) {
+        document.getElementById('toolFormMsg').innerHTML = '<div class="msg err">' + err.message + '</div>';
+      }
+    }
+    async function deleteTool(id) {
+      if (!confirm('Удалить этот инструмент?')) return;
+      try {
+        const r = await fetch(API + '/tools/' + id, { method: 'DELETE' });
+        const j = await r.json().catch(() => ({}));
+        if (j.status === 'error' || (r.ok === false && j.message)) throw new Error(j.message || r.statusText);
+        loadToolsList();
+        loadTools();
+      } catch (err) {
+        alert('Ошибка: ' + err.message);
+      }
+    }
+
+    function toggleToolsDetail(toolId) {
+      const detailRow = document.querySelector(`tr.tools-detail-row[data-detail-for="${toolId}"]`);
+      const mainRow = document.querySelector(`tr.tools-row[data-tool-id="${toolId}"]`);
+      const icon = mainRow && mainRow.querySelector('.expand-icon');
+      if (!detailRow) return;
+      const isHidden = detailRow.style.display === 'none';
+      detailRow.style.display = isHidden ? 'table-row' : 'none';
+      if (icon) icon.textContent = isHidden ? '▼' : '▶';
+    }
+
+    document.getElementById('toolForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = e.target;
+      const msgEl = document.getElementById('toolFormMsg');
+      const exts = form.fileExtensions.value.trim().split(',').map(s => s.trim()).filter(Boolean);
+      msgEl.innerHTML = '';
+      try {
+        if (editingToolId) {
+          const body = { dockerImage: form.dockerImage.value.trim(), fileExtensions: exts, enabled: form.enabled.checked };
+          const r = await fetch(API + '/tools/' + editingToolId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          const j = await r.json();
+          if (j.status === 'error' || !r.ok) throw new Error(j.message || r.statusText);
+          msgEl.innerHTML = '<div class="msg ok">Инструмент обновлён</div>';
+          editingToolId = null;
+          form.name.disabled = false;
+          document.getElementById('toolFormSubmit').textContent = 'Создать';
+          document.getElementById('toolFormCancel').style.display = 'none';
+        } else {
+          const body = { name: form.name.value.trim(), dockerImage: form.dockerImage.value.trim(), fileExtensions: exts, enabled: form.enabled.checked };
+          const r = await fetch(API + '/tools', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          const j = await r.json();
+          if (j.status === 'error' || !r.ok) throw new Error(j.message || r.statusText);
+          msgEl.innerHTML = '<div class="msg ok">Инструмент создан</div>';
+        }
+        loadToolsList();
+        loadTools();
+      } catch (err) {
+        msgEl.innerHTML = '<div class="msg err">' + err.message + '</div>';
+      }
+    });
+    document.getElementById('toolFormCancel').addEventListener('click', () => {
+      editingToolId = null;
+      document.getElementById('toolForm').reset();
+      document.getElementById('toolForm').name.disabled = false;
+      document.getElementById('toolFormSubmit').textContent = 'Создать';
+      document.getElementById('toolFormCancel').style.display = 'none';
+      document.getElementById('toolFormMsg').innerHTML = '';
+    });
+
+    document.getElementById('refreshTools').addEventListener('click', loadToolsList);
+
+    async function loadSummarizersList() {
+      const el = document.getElementById('summarizersTable');
+      try {
+        const r = await fetch(API + '/summarizers');
+        const j = await r.json();
+        if (j.status === 'error') throw new Error(j.message);
+        const list = j.data != null ? (Array.isArray(j.data) ? j.data : j.data.data) : [];
+        summarizerProviderByName = new Map();
+        list.forEach(s => {
+          if (s && s.name) summarizerProviderByName.set(String(s.name), String(s.provider || 'OPENAI').toUpperCase());
+        });
+        if (!list.length) {
+          el.innerHTML = '<p class="meta">Нет маршрутов LLM</p>';
+          return;
+        }
+        function esc(s) {
+          if (s == null) return '—';
+          const d = document.createElement('div');
+          d.textContent = String(s);
+          return d.innerHTML;
+        }
+        const rows = list.map(s => `
+            <tr class="summarizers-row" data-summarizer-id="${s.id}" style="cursor:pointer">
+              <td><span class="expand-icon" data-summarizer-id="${s.id}">▶</span></td>
+              <td><code>${esc(s.id)}</code></td>
+              <td>${esc(s.name)}</td>
+              <td>${esc(s.provider)}</td>
+              <td>${esc(s.baseUrl)}</td>
+              <td>${esc(s.modelId)}</td>
+              <td>${s.enabled ? 'да' : 'нет'}</td>
+              <td class="actions-cell">
+                <button type="button" class="btn btn-small summarizer-edit" data-summarizer-id="${s.id}">Изменить</button>
+                <button type="button" class="btn btn-small btn-danger summarizer-delete" data-summarizer-id="${s.id}">Удалить</button>
+              </td>
+            </tr>
+            <tr class="summarizers-detail-row" data-detail-for="${s.id}" style="display:none">
+              <td colspan="8"><div class="tools-detail-inner"><pre>${esc(JSON.stringify(s, null, 2))}</pre></div></td>
+            </tr>`).join('');
+        el.innerHTML = `<table><thead><tr><th></th><th>ID</th><th>Имя</th><th>Провайдер</th><th>Base URL</th><th>Model ID</th><th>Включён</th><th>Действия</th></tr></thead><tbody>${rows}</tbody></table>`;
+        el.querySelectorAll('.summarizers-row').forEach(tr => {
+          tr.addEventListener('click', (e) => {
+            if (e.target.classList.contains('expand-icon')) return;
+            toggleSummarizersDetail(tr.dataset.summarizerId);
+          });
+        });
+        el.querySelectorAll('.summarizers-row .expand-icon').forEach(span => {
+          span.addEventListener('click', (e) => { e.stopPropagation(); toggleSummarizersDetail(span.dataset.summarizerId); });
+        });
+        el.querySelectorAll('.summarizer-edit').forEach(btn => {
+          btn.addEventListener('click', (e) => { e.stopPropagation(); editSummarizer(btn.dataset.summarizerId); });
+        });
+        el.querySelectorAll('.summarizer-delete').forEach(btn => {
+          btn.addEventListener('click', (e) => { e.stopPropagation(); deleteSummarizer(btn.dataset.summarizerId); });
+        });
+      } catch (e) {
+        el.innerHTML = '<p class="msg err">Ошибка: ' + e.message + '</p>';
+      }
+    }
+
+    async function editSummarizer(id) {
+      try {
+        const r = await fetch(API + '/summarizers/' + id);
+        const j = await r.json();
+        if (j.status === 'error' || !j.data) throw new Error(j.message || 'Не удалось загрузить маршрут LLM');
+        const s = j.data;
+        const form = document.getElementById('summarizerForm');
+        form.name.value = s.name || '';
+        form.name.disabled = true;
+        form.provider.value = s.provider || 'OPENAI';
+        form.baseUrl.value = s.baseUrl || '';
+        form.modelId.value = s.modelId || '';
+        form.apiKeyEnvVar.value = s.apiKeyEnvVar || '';
+        form.enabled.checked = s.enabled !== false;
+        editingSummarizerId = id;
+        document.getElementById('summarizerFormSubmit').textContent = 'Сохранить';
+        document.getElementById('summarizerFormCancel').style.display = 'inline-block';
+        document.getElementById('summarizerFormMsg').innerHTML = '';
+        applySummarizerFormProviderUi();
+        form.scrollIntoView({ behavior: 'smooth' });
+      } catch (err) {
+        document.getElementById('summarizerFormMsg').innerHTML = '<div class="msg err">' + err.message + '</div>';
+      }
+    }
+    async function deleteSummarizer(id) {
+      if (!confirm('Удалить этот маршрут LLM?')) return;
+      try {
+        const r = await fetch(API + '/summarizers/' + id, { method: 'DELETE' });
+        const j = await r.json().catch(() => ({}));
+        if (j.status === 'error' || (r.ok === false && j.message)) throw new Error(j.message || r.statusText);
+        loadSummarizersList();
+        loadSummarizers();
+      } catch (err) {
+        alert('Ошибка: ' + err.message);
+      }
+    }
+    function toggleSummarizersDetail(id) {
+      const detailRow = document.querySelector(`tr.summarizers-detail-row[data-detail-for="${id}"]`);
+      const mainRow = document.querySelector(`tr.summarizers-row[data-summarizer-id="${id}"]`);
+      const icon = mainRow && mainRow.querySelector('.expand-icon');
+      if (!detailRow) return;
+      const isHidden = detailRow.style.display === 'none';
+      detailRow.style.display = isHidden ? 'table-row' : 'none';
+      if (icon) icon.textContent = isHidden ? '▼' : '▶';
+    }
+    document.getElementById('summarizerForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = e.target;
+      const msgEl = document.getElementById('summarizerFormMsg');
+      msgEl.innerHTML = '';
+      const pv = form.provider.value;
+      if (!editingSummarizerId && pv !== 'OPENAI' && pv !== 'EXTERNAL') {
+        msgEl.innerHTML = '<div class="msg err">Сначала выберите провайдер.</div>';
+        return;
+      }
+      try {
+        if (editingSummarizerId) {
+          const body = { provider: form.provider.value, baseUrl: form.baseUrl.value.trim() || null, modelId: form.modelId.value.trim(), apiKeyEnvVar: form.apiKeyEnvVar.value.trim() || null, enabled: form.enabled.checked };
+          const r = await fetch(API + '/summarizers/' + editingSummarizerId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          const j = await r.json();
+          if (j.status === 'error' || !r.ok) throw new Error(j.message || r.statusText);
+          msgEl.innerHTML = '<div class="msg ok">Маршрут LLM обновлён</div>';
+          editingSummarizerId = null;
+          form.name.disabled = false;
+          document.getElementById('summarizerFormSubmit').textContent = 'Создать';
+          document.getElementById('summarizerFormCancel').style.display = 'none';
+          applySummarizerFormProviderUi();
+        } else {
+          const body = { name: form.name.value.trim(), provider: form.provider.value, baseUrl: form.baseUrl.value.trim() || null, modelId: form.modelId.value.trim(), apiKeyEnvVar: form.apiKeyEnvVar.value.trim() || null, enabled: form.enabled.checked };
+          const r = await fetch(API + '/summarizers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          const j = await r.json();
+          if (j.status === 'error' || !r.ok) throw new Error(j.message || r.statusText);
+          msgEl.innerHTML = '<div class="msg ok">Маршрут LLM создан</div>';
+        }
+        loadSummarizersList();
+        loadSummarizers();
+      } catch (err) {
+        msgEl.innerHTML = '<div class="msg err">' + err.message + '</div>';
+      }
+    });
+    document.getElementById('summarizerFormCancel').addEventListener('click', () => {
+      editingSummarizerId = null;
+      document.getElementById('summarizerForm').reset();
+      document.getElementById('summarizerForm').name.disabled = false;
+      document.getElementById('summarizerFormSubmit').textContent = 'Создать';
+      document.getElementById('summarizerFormCancel').style.display = 'none';
+      document.getElementById('summarizerFormMsg').innerHTML = '';
+      applySummarizerFormProviderUi();
+    });
+    document.getElementById('summarizerForm').provider.addEventListener('change', applySummarizerFormProviderUi);
+    applySummarizerFormProviderUi();
+    document.getElementById('refreshSummarizers').addEventListener('click', loadSummarizersList);
+
+    function fillDockerFormFromProfile(p) {
+      const form = document.getElementById('dockerForm');
+      document.getElementById('dockerEditingProfileId').value = p.id || '';
+      form.profileName.value = p.name || '';
+      document.getElementById('dockerHostUri').value = p.dockerHostUri || '';
+      document.getElementById('namedVolumeForChildBinds').value = p.namedVolumeForChildBinds || '';
+      document.getElementById('dockerProfileEnabled').checked = p.enabled !== false;
+      form.memoryLimitMb.value = p.memoryLimitMb ?? '';
+      form.memoryReservationMb.value = p.memoryReservationMb ?? '';
+      form.cpuLimit.value = p.cpuLimit ?? '';
+      form.cpuShares.value = p.cpuShares ?? '';
+      form.maxConcurrentContainers.value = p.maxConcurrentContainers ?? 1;
+      form.networkMode.value = p.networkMode ?? '';
+      form.restartPolicy.value = p.restartPolicy ?? '';
+      form.restartMaxRetries.value = p.restartMaxRetries ?? '';
+      form.logDriver.value = p.logDriver ?? '';
+      form.logMaxSize.value = p.logMaxSize ?? '';
+      form.logMaxFiles.value = p.logMaxFiles ?? '';
+      form.environmentVariables.value = p.environmentVariables ? (typeof p.environmentVariables === 'string' ? p.environmentVariables : JSON.stringify(p.environmentVariables)) : '';
+      form.labels.value = p.labels ? (typeof p.labels === 'string' ? p.labels : JSON.stringify(p.labels)) : '';
+    }
+
+    async function loadDocker() {
+      const contentEl = document.getElementById('dockerContent');
+      const formBox = document.getElementById('dockerFormBox');
+      const formTitle = document.getElementById('dockerFormTitle');
+      const formSubmit = document.getElementById('dockerFormSubmit');
+      const formCancel = document.getElementById('dockerFormCancel');
+      const deleteBtn = document.getElementById('dockerDelete');
+      const msgEl = document.getElementById('dockerFormMsg');
+      msgEl.innerHTML = '';
+      try {
+        const r = await fetch(API + '/docker-profiles');
+        const j = await r.json();
+        if (j.status === 'error') throw new Error(j.message || 'profiles');
+        const profiles = j.profiles || [];
+        if (!profiles.length) {
+          contentEl.innerHTML = '<p class="meta">Нет профилей. Заполните форму ниже и создайте первый.</p>';
+          formBox.style.display = 'block';
+          formTitle.textContent = 'Создать профиль Docker';
+          formSubmit.textContent = 'Создать';
+          formCancel.style.display = 'none';
+          deleteBtn.style.display = 'none';
+          document.getElementById('dockerEditingProfileId').value = '';
+          document.getElementById('dockerForm').reset();
+          document.getElementById('dockerProfileEnabled').checked = true;
+          return;
+        }
+        const rows = profiles.map(function (p) {
+          return '<tr><td>' + escapeHtml(p.name) + '</td><td>' + p.maxConcurrentContainers + '</td><td>' + (p.enabled ? 'да' : 'нет') + '</td><td><button type="button" class="btn btn-small btn-edit-docker" data-id="' + escapeAttr(p.id) + '">Править</button></td></tr>';
+        }).join('');
+        contentEl.innerHTML = '<table><thead><tr><th>Имя</th><th>Max параллельно</th><th>Вкл.</th><th></th></tr></thead><tbody>' + rows + '</tbody></table><p style="margin-top:0.75rem"><button type="button" class="btn" id="dockerNewBtn">Новый профиль</button></p>';
+        formBox.style.display = 'none';
+        deleteBtn.style.display = 'none';
+        contentEl.querySelectorAll('.btn-edit-docker').forEach(function (btn) {
+          btn.addEventListener('click', async function () {
+            try {
+              const id = this.getAttribute('data-id');
+              const pr = await fetch(API + '/docker-profiles/' + encodeURIComponent(id));
+              const pj = await pr.json();
+              if (pj.status === 'error' || !pj.profile) throw new Error(pj.message || 'profile');
+              const p = pj.profile;
+              formBox.style.display = 'block';
+              formTitle.textContent = 'Обновить профиль';
+              formSubmit.textContent = 'Сохранить';
+              formCancel.style.display = 'inline-block';
+              deleteBtn.style.display = p.name === 'Default' ? 'none' : 'inline-block';
+              fillDockerFormFromProfile(p);
+            } catch (err) {
+              document.getElementById('dockerFormMsg').innerHTML = '<div class="msg err">' + err.message + '</div>';
+            }
+          });
+        });
+        document.getElementById('dockerNewBtn').addEventListener('click', function () {
+          formBox.style.display = 'block';
+          formTitle.textContent = 'Создать профиль Docker';
+          formSubmit.textContent = 'Создать';
+          formCancel.style.display = 'inline-block';
+          deleteBtn.style.display = 'none';
+          document.getElementById('dockerForm').reset();
+          document.getElementById('dockerEditingProfileId').value = '';
+          document.getElementById('dockerProfileEnabled').checked = true;
+        });
+      } catch (e) {
+        contentEl.innerHTML = '<p class="msg err">Ошибка: ' + e.message + '</p>';
+      }
+    }
+
+    function escapeHtml(s) {
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
+
+    function escapeAttr(s) {
+      return String(s ?? '')
+          .replace(/&/g, '&amp;')
+          .replace(/"/g, '&quot;')
+          .replace(/</g, '&lt;');
+    }
+
+    function isSummaryStatusCompleted(status) {
+      return String(status || '').trim().toUpperCase() === 'COMPLETED';
+    }
+
+    function isAwaitingExternalSummary(status) {
+      return String(status || '').trim().toUpperCase() === 'AWAITING_EXTERNAL_CALLBACK';
+    }
+
+    function parseExternalPendingData(summaryData) {
+      let d = summaryData;
+      if (d == null) return { instructionsRu: '', deadlineAt: '' };
+      if (typeof d === 'string') {
+        try {
+          d = JSON.parse(d);
+        } catch (_) {
+          return { instructionsRu: '', deadlineAt: '' };
+        }
+      }
+      if (typeof d !== 'object' || d === null) return { instructionsRu: '', deadlineAt: '' };
+      return {
+        instructionsRu: typeof d.instructionsRu === 'string' ? d.instructionsRu : '',
+        deadlineAt: typeof d.deadlineAt === 'string' ? d.deadlineAt : ''
+      };
+    }
+
+    /** Текст отчёта из summaryData (объект API, строка JSON, альтернативные ключи). */
+    function normalizeSummaryPayload(raw) {
+      let data = raw;
+      if (data == null) return { text: '', summarizerName: '', model: '' };
+      if (typeof data === 'string') {
+        const t = data.trim();
+        if (!t) return { text: '', summarizerName: '', model: '' };
+        try {
+          data = JSON.parse(t);
+        } catch (_) {
+          return { text: t, summarizerName: '', model: '' };
+        }
+      }
+      if (typeof data !== 'object' || data === null) {
+        return { text: String(data), summarizerName: '', model: '' };
+      }
+      function pickText(d) {
+        if (typeof d.text === 'string' && d.text.length > 0) return d.text;
+        if (typeof d.body === 'string') return d.body;
+        if (typeof d.content === 'string') return d.content;
+        if (typeof d.message === 'string') return d.message;
+        if (typeof d.markdown === 'string') return d.markdown;
+        if (typeof d.answer === 'string') return d.answer;
+        if (typeof d.output === 'string') return d.output;
+        if (typeof d.report === 'string') return d.report;
+        return '';
+      }
+      let text = pickText(data);
+      if (!text.trim() && Object.keys(data).length > 0) {
+        try {
+          text = JSON.stringify(data, null, 2);
+        } catch (_) {
+          text = '';
+        }
+      }
+      return {
+        text,
+        summarizerName: typeof data.summarizerName === 'string' ? data.summarizerName : '',
+        model: typeof data.model === 'string' ? data.model : ''
+      };
+    }
+
+    document.getElementById('dockerForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = e.target;
+      const msgEl = document.getElementById('dockerFormMsg');
+      const editId = document.getElementById('dockerEditingProfileId').value.trim();
+      const num = (name) => { const v = form[name].value; return v === '' ? null : (name === 'cpuLimit' ? parseFloat(v) : parseInt(v, 10)); };
+      const str = (name) => form[name].value.trim() || null;
+      const body = {
+        name: form.profileName.value.trim(),
+        dockerHostUri: str('dockerHostUri'),
+        namedVolumeForChildBinds: str('namedVolumeForChildBinds'),
+        enabled: document.getElementById('dockerProfileEnabled').checked,
+        memoryLimitMb: num('memoryLimitMb'),
+        memoryReservationMb: num('memoryReservationMb'),
+        cpuLimit: num('cpuLimit'),
+        cpuShares: num('cpuShares'),
+        maxConcurrentContainers: num('maxConcurrentContainers') ?? 1,
+        networkMode: str('networkMode'),
+        restartPolicy: str('restartPolicy'),
+        restartMaxRetries: num('restartMaxRetries'),
+        logDriver: str('logDriver'),
+        logMaxSize: str('logMaxSize'),
+        logMaxFiles: num('logMaxFiles'),
+        environmentVariables: str('environmentVariables'),
+        labels: str('labels')
+      };
+      if (!body.name) {
+        msgEl.innerHTML = '<div class="msg err">Укажите имя профиля</div>';
+        return;
+      }
+      if (body.memoryLimitMb == null) body.memoryLimitMb = 512;
+      if (body.memoryReservationMb == null) body.memoryReservationMb = 256;
+      if (body.cpuLimit == null) body.cpuLimit = 1;
+      if (body.cpuShares == null) body.cpuShares = 0;
+      if (body.maxConcurrentContainers == null) body.maxConcurrentContainers = 1;
+      if (body.logMaxFiles == null) body.logMaxFiles = 3;
+      msgEl.innerHTML = '';
+      try {
+        const url = editId
+            ? (API + '/docker-profiles/' + encodeURIComponent(editId))
+            : (API + '/docker-profiles');
+        const method = editId ? 'PUT' : 'POST';
+        const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const j = await r.json();
+        if (j.status === 'error' || !r.ok) throw new Error(j.message || r.statusText);
+        msgEl.innerHTML = '<div class="msg ok">Профиль сохранён</div>';
+        loadDocker();
+        loadDockerProfilesForRun();
+      } catch (err) {
+        msgEl.innerHTML = '<div class="msg err">' + err.message + '</div>';
+      }
+    });
+    document.getElementById('dockerFormCancel').addEventListener('click', () => { document.getElementById('dockerFormBox').style.display = 'none'; loadDocker(); });
+    document.getElementById('dockerDelete').addEventListener('click', async () => {
+      const editId = document.getElementById('dockerEditingProfileId').value.trim();
+      if (!editId) return;
+      if (!confirm('Удалить этот профиль Docker?')) return;
+      try {
+        const r = await fetch(API + '/docker-profiles/' + encodeURIComponent(editId), { method: 'DELETE' });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.message || r.statusText);
+        document.getElementById('dockerFormBox').style.display = 'none';
+        loadDocker();
+        loadDockerProfilesForRun();
+      } catch (e) {
+        document.getElementById('dockerFormMsg').innerHTML = '<div class="msg err">' + e.message + '</div>';
+      }
+    });
+    document.getElementById('refreshDocker').addEventListener('click', loadDocker);
+
+    document.getElementById('runForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const msgEl = document.getElementById('runMsg');
+      const form = e.target;
+      const fileInput = document.getElementById('fileInput');
+      if (!fileInput.files.length) {
+        msgEl.innerHTML = '<div class="msg err">Выберите файл</div>';
+        return;
+      }
+      const fd = new FormData();
+      fd.append('file', fileInput.files[0]);
+      fd.append('tool', form.tool.value);
+      fd.append('command', form.command.value);
+      fd.append('expectedDurationSeconds', form.expectedDurationSeconds.value);
+      if (document.getElementById('metricsConfigEnabled').checked) {
+        if (!metricsConfigUiInitialized) initMetricsConfigUiOnce();
+        const pack = serializeMetricsConfig();
+        if (pack.errors.length) {
+          msgEl.innerHTML = '<div class="msg err">' + pack.errors.map(function (x) {
+            return String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+          }).join('<br>') + '</div>';
+          return;
+        }
+        fd.append('metricsConfig', JSON.stringify(pack.data));
+      }
+      if (form.summarizer && form.summarizer.value.trim()) fd.append('summarizer', form.summarizer.value.trim());
+      const dps = document.getElementById('dockerProfileSelect');
+      if (dps && dps.value) fd.append('dockerExecutionProfileId', dps.value);
+
+      msgEl.innerHTML = '<div class="msg">Отправка…</div>';
+      try {
+        const r = await fetch(API + '/upload', { method: 'POST', body: fd });
+        const res = await r.json();
+        if (res.status === 'success') {
+          msgEl.innerHTML = `<div class="msg ok">Задача добавлена: ${res.taskId}</div>`;
+          loadQueue();
+        } else {
+          msgEl.innerHTML = '<div class="msg err">' + (res.message || r.status) + '</div>';
+        }
+      } catch (err) {
+        msgEl.innerHTML = '<div class="msg err">' + err.message + '</div>';
+      }
+    });
+
+    loadDockerProfilesForRun();
+    loadQueue();
+  </script>
+</body>
+</html>

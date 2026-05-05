@@ -1,0 +1,35 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: test-app-2
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+      elastic:
+        enabled: false
+        host: elasticsearch
+        port: 9200
+        index: metrics
+        index-date-format: yyyy.MM.dd
+        timestamp-field-name: "@timestamp"
+        auto-create-index: true
+        step: 15s
+    tags:
+      application: ${spring.application.name}
+      environment: test
+
+logging:
+  level:
+    root: INFO
+    com.loadtest: DEBUG
+    io.micrometer: DEBUG
+    io.micrometer.elastic: DEBUG

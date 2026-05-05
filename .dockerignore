@@ -1,0 +1,12 @@
+.git
+.idea
+.vscode
+.cursor
+**/build
+**/out
+**/.gradle
+**/bin
+*.iml
+terminals
+**/*.log
+test-apps/**/build

@@ -1,0 +1,121 @@
+x-restart-unless-stopped: &restart-unless-stopped
+  restart: unless-stopped
+
+services:
+  prometheus:
+    <<: *restart-unless-stopped
+    image: prom/prometheus:latest
+    container_name: prometheus
+    mem_limit: 512m
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - loadtest-network
+
+  elasticsearch:
+    <<: *restart-unless-stopped
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: elasticsearch
+    mem_limit: 1g
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      - loadtest-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  test-app-1:
+    <<: *restart-unless-stopped
+    build:
+      context: ./app1
+      dockerfile: Dockerfile
+    container_name: test-app-1
+    mem_limit: 512m
+    ports:
+      - "8081:8080"
+    environment:
+      - SPRING_APPLICATION_NAME=test-app-1
+      - SERVER_PORT=8080
+      - MANAGEMENT_METRICS_EXPORT_ELASTIC_ENABLED=true
+      - MANAGEMENT_METRICS_EXPORT_ELASTIC_HOST=elasticsearch
+      - MANAGEMENT_METRICS_EXPORT_ELASTIC_PORT=9200
+      - MANAGEMENT_METRICS_EXPORT_ELASTIC_INDEX=metrics
+      - MANAGEMENT_METRICS_EXPORT_ELASTIC_AUTO_CREATE_INDEX=true
+      - MANAGEMENT_METRICS_EXPORT_ELASTIC_STEP=15s
+    networks:
+      - loadtest-network
+    depends_on:
+      prometheus:
+        condition: service_started
+      elasticsearch:
+        condition: service_healthy
+
+  test-app-2:
+    <<: *restart-unless-stopped
+    build:
+      context: ./app2
+      dockerfile: Dockerfile
+    container_name: test-app-2
+    mem_limit: 512m
+    ports:
+      - "8084:8080"
+    environment:
+      - SPRING_APPLICATION_NAME=test-app-2
+      - SERVER_PORT=8080
+      - MANAGEMENT_METRICS_EXPORT_ELASTIC_ENABLED=true
+      - MANAGEMENT_METRICS_EXPORT_ELASTIC_HOST=elasticsearch
+      - MANAGEMENT_METRICS_EXPORT_ELASTIC_PORT=9200
+      - MANAGEMENT_METRICS_EXPORT_ELASTIC_INDEX=metrics
+      - MANAGEMENT_METRICS_EXPORT_ELASTIC_AUTO_CREATE_INDEX=true
+      - MANAGEMENT_METRICS_EXPORT_ELASTIC_STEP=15s
+    networks:
+      - loadtest-network
+    depends_on:
+      prometheus:
+        condition: service_started
+      elasticsearch:
+        condition: service_healthy
+
+  external-llm-mock:
+    <<: *restart-unless-stopped
+    build:
+      context: ./external-llm-mock
+      dockerfile: Dockerfile
+    container_name: external-llm-mock
+    mem_limit: 256m
+    ports:
+      - "8095:8095"
+    environment:
+      LOADTEST_CALLBACK_BASE_URL: http://host.docker.internal:8080
+      MOCK_WAIT_MINUTES: "0"
+      MOCK_CLIENT_NAME: external-llm-mock
+      MOCK_SERVER_PORT: "8095"
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=70.0"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - loadtest-network
+
+networks:
+  loadtest-network:
+    external: true
+    name: loadtest_loadtest-network
+
+volumes:
+  prometheus-data:
+  elasticsearch-data:

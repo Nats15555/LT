@@ -1,0 +1,42 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: app-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/loadtest
+    username: loadtest
+    password: loadtest
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    open-in-view: false
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        spring.json.type.mapping: testTaskEvent:com.loadtest.app.dto.TestTaskEvent
+
+kafka:
+  topic:
+    test-tasks: test-tasks
+    summarization-tasks: summarization-tasks
+
+loadtest:
+  external-summary:
+    window-minutes: 2
+  external-llm:
+    # Резервный URL, если у маршрута EXTERNAL в summarizer_models не задан base_url.
+    # Обычно задаётся только base_url у записи маршрута (ingest в вашем контуре).
+    receiver-url: ${LOADTEST_EXTERNAL_LLM_RECEIVER_URL:}
+    # Если app на хосте, а в БД ingest с Docker DNS (external-llm-mock), задайте localhost (или через env ниже).
+    rewrite-docker-service-host-to: ${LOADTEST_EXTERNAL_LLM_REWRITE_DOCKER_SERVICE_HOST_TO:}
+
+logging:
+  level:
+    com.loadtest: INFO
+    org.springframework: INFO

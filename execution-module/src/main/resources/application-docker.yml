@@ -1,0 +1,12 @@
+spring:
+  config:
+    activate:
+      on-profile: docker
+
+file:
+  storage:
+    upload-dir: /data/loadtest/uploads
+
+loadtest:
+  execution:
+    named-volume-for-child-binds: ${LOADTEST_EXECUTION_NAMED_VOLUME_FOR_CHILD_BINDS:loadtest_execution-data}

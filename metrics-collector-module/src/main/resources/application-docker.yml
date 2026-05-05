@@ -1,0 +1,8 @@
+spring:
+  config:
+    activate:
+      on-profile: docker
+
+metrics:
+  host-overrides:
+    localhost: host.docker.internal

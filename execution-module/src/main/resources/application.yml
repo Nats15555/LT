@@ -1,0 +1,50 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: execution-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/loadtest
+    username: loadtest
+    password: loadtest
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    open-in-view: false
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: execution-service-group
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        max.poll.interval.ms: 1800000
+        spring.json.use.type.headers: false
+        spring.json.value.default.type: com.loadtest.execution.dto.TestTaskEvent
+        spring.json.trusted.packages: "*"
+
+kafka:
+  topic:
+    test-tasks: test-tasks
+    metrics-collection-tasks: metrics-collection-tasks
+
+file:
+  storage:
+    upload-dir: uploads
+    working-dir: ""
+    artifact-base-path: artifacts
+    artifact-reports-subdir: reports
+    artifact-metrics-subdir: metrics
+
+container:
+  default-network: loadtest_loadtest-network
+
+logging:
+  level:
+    com.loadtest: INFO
+    com.loadtest.execution.ContainerExecutionService: DEBUG
+    org.springframework: INFO

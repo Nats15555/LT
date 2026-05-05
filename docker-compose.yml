@@ -1,0 +1,225 @@
+name: loadtest
+
+x-java-env: &java-env
+  SPRING_PROFILES_ACTIVE: docker
+  SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/loadtest
+  SPRING_DATASOURCE_USERNAME: loadtest
+  SPRING_DATASOURCE_PASSWORD: loadtest
+  SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+
+x-restart-unless-stopped: &restart-unless-stopped
+  restart: unless-stopped
+
+services:
+  postgres:
+    <<: *restart-unless-stopped
+    image: postgres:16-alpine
+    container_name: loadtest-postgres
+    mem_limit: 512m
+    environment:
+      POSTGRES_DB: loadtest
+      POSTGRES_USER: loadtest
+      POSTGRES_PASSWORD: loadtest
+    ports:
+      - "5432:5432"
+    volumes:
+      - loadtest-postgres-data:/var/lib/postgresql/data
+      - ./docker-init:/docker-entrypoint-initdb.d
+    networks:
+      - loadtest-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U loadtest -d loadtest"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  kafka:
+    <<: *restart-unless-stopped
+    image: confluentinc/cp-kafka:latest
+    container_name: loadtest-kafka
+    mem_limit: 768m
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      - "9092:9092"
+    networks:
+      - loadtest-network
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  kafka-ui:
+    <<: *restart-unless-stopped
+    profiles: ["ui"]
+    image: provectuslabs/kafka-ui:latest
+    container_name: loadtest-kafka-ui
+    mem_limit: 256m
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    ports:
+      - "8090:8080"
+    networks:
+      - loadtest-network
+
+  zookeeper:
+    <<: *restart-unless-stopped
+    image: confluentinc/cp-zookeeper:latest
+    container_name: loadtest-zookeeper
+    mem_limit: 384m
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - loadtest-network
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  litellm:
+    <<: *restart-unless-stopped
+    profiles: ["summarization"]
+    image: ghcr.io/berriai/litellm:main-stable
+    container_name: loadtest-litellm
+    mem_limit: 512m
+    ports:
+      - "4000:4000"
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    networks:
+      - loadtest-network
+
+  app:
+    <<: *restart-unless-stopped
+    profiles: ["apps"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app
+    image: loadtest-app:local
+    container_name: loadtest-app
+    mem_limit: 768m
+    ports:
+      - "8080:8080"
+    environment:
+      <<: *java-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - loadtest-network
+
+  execution:
+    <<: *restart-unless-stopped
+    profiles: ["apps"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: execution
+    image: loadtest-execution:local
+    container_name: loadtest-execution
+    mem_limit: 768m
+    ports:
+      - "8082:8082"
+    environment:
+      <<: *java-env
+      DOCKER_HOST: unix:///var/run/docker.sock
+      CONTAINER_DEFAULT_NETWORK: loadtest_loadtest-network
+      FILE_STORAGE_WORKING_DIR: /data/loadtest
+      LOADTEST_EXECUTION_NAMED_VOLUME_FOR_CHILD_BINDS: loadtest_execution-data
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - execution-data:/data/loadtest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - loadtest-network
+
+  metrics-collector:
+    <<: *restart-unless-stopped
+    profiles: ["metrics"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: metrics-collector
+    image: loadtest-metrics-collector:local
+    container_name: loadtest-metrics-collector
+    mem_limit: 512m
+    ports:
+      - "8083:8083"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      <<: *java-env
+      LOADTEST_APP_BASE_URL: http://app:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      app:
+        condition: service_started
+    networks:
+      - loadtest-network
+
+  summarization:
+    <<: *restart-unless-stopped
+    profiles: ["summarization"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: summarization
+    image: loadtest-summarization:local
+    container_name: loadtest-summarization
+    mem_limit: 512m
+    ports:
+      - "8085:8085"
+    environment:
+      <<: *java-env
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
+      LOADTEST_SUMMARIZATION_LITELLM_BASE_URL_OVERRIDE: http://litellm:4000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      litellm:
+        condition: service_started
+    networks:
+      - loadtest-network
+
+networks:
+  loadtest-network:
+    driver: bridge
+
+volumes:
+  loadtest-postgres-data:
+  execution-data:
+

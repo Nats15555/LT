@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+  scrape_timeout: 5s
+
+scrape_configs:
+  - job_name: 'test-app-1'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['test-app-1:8080']
+        labels:
+          app: 'test-app-1'
+          environment: 'test'
+
+  - job_name: 'test-app-2'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['test-app-2:8080']
+        labels:
+          app: 'test-app-2'
+          environment: 'test'
