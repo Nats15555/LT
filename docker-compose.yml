@@ -103,7 +103,7 @@ services:
     ports:
       - "4000:4000"
     environment:
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-loadtest-local}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       - ./litellm/config.yaml:/app/config.yaml:ro
@@ -203,7 +203,7 @@ services:
       - "8085:8085"
     environment:
       <<: *java-env
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-loadtest-local}
       LOADTEST_SUMMARIZATION_LITELLM_BASE_URL_OVERRIDE: http://litellm:4000
     depends_on:
       postgres:
