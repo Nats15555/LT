@@ -1,7 +1,6 @@
 package com.loadtest.metrics.config;
 
 import com.loadtest.metrics.dto.MetricsCollectionEvent;
-import com.loadtest.metrics.dto.SummarizationTaskEvent;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;

@@ -39,12 +39,7 @@ class SummarizerServiceTest {
     @Test
     void create_openAi_requiresModelId() {
         when(repository.existsByName("m")).thenReturn(false);
-        assertThatThrownBy(() -> service.create(CreateSummarizerRequest.builder()
-                        .name("m")
-                        .provider("OPENAI")
-                        .modelId("  ")
-                        .enabled(true)
-                        .build()))
+        assertThatThrownBy(() -> service.create(new CreateSummarizerRequest("m", "OPENAI", null, "  ", null, true)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Model ID");
     }
@@ -52,12 +47,7 @@ class SummarizerServiceTest {
     @Test
     void create_external_requiresHttpBaseUrl() {
         when(repository.existsByName("e")).thenReturn(false);
-        assertThatThrownBy(() -> service.create(CreateSummarizerRequest.builder()
-                        .name("e")
-                        .provider("EXTERNAL")
-                        .baseUrl("ftp://x")
-                        .enabled(true)
-                        .build()))
+        assertThatThrownBy(() -> service.create(new CreateSummarizerRequest("e", "EXTERNAL", "ftp://x", null, null, true)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("http");
     }
@@ -66,13 +56,7 @@ class SummarizerServiceTest {
     void create_external_defaultsModelId() {
         when(repository.existsByName("e")).thenReturn(false);
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        service.create(CreateSummarizerRequest.builder()
-                .name("e")
-                .provider("EXTERNAL")
-                .baseUrl("https://ingest.example/hook")
-                .modelId(null)
-                .enabled(true)
-                .build());
+        service.create(new CreateSummarizerRequest("e", "EXTERNAL", "https://ingest.example/hook", null, null, true));
         ArgumentCaptor<SummarizerModelEntity> cap = ArgumentCaptor.forClass(SummarizerModelEntity.class);
         verify(repository).save(cap.capture());
         assertThat(cap.getValue().getModelId()).isEqualTo("external");
@@ -81,11 +65,7 @@ class SummarizerServiceTest {
     @Test
     void create_duplicateName() {
         when(repository.existsByName("dup")).thenReturn(true);
-        assertThatThrownBy(() -> service.create(CreateSummarizerRequest.builder()
-                        .name("dup")
-                        .modelId("gpt")
-                        .enabled(true)
-                        .build()))
+        assertThatThrownBy(() -> service.create(new CreateSummarizerRequest("dup", null, null, "gpt", null, true)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("already exists");
     }
@@ -94,13 +74,8 @@ class SummarizerServiceTest {
     void create_defaultsProviderToOpenAiWhenNull() {
         when(repository.existsByName("n")).thenReturn(false);
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        var dto = service.create(CreateSummarizerRequest.builder()
-                .name("n")
-                .provider(null)
-                .modelId("gpt-4o-mini")
-                .enabled(true)
-                .build());
-        assertThat(dto.getProvider()).isEqualTo("OPENAI");
+        var dto = service.create(new CreateSummarizerRequest("n", null, null, "gpt-4o-mini", null, true));
+        assertThat(dto.provider()).isEqualTo("OPENAI");
     }
 
     @Test
@@ -122,8 +97,8 @@ class SummarizerServiceTest {
 
         assertThat(service.getAll()).hasSize(1);
         assertThat(service.getEnabled()).hasSize(1);
-        assertThat(service.getById(id).getName()).isEqualTo("n");
-        assertThat(service.getByName("n").getId()).isEqualTo(id);
+        assertThat(service.getById(id).name()).isEqualTo("n");
+        assertThat(service.getByName("n").id()).isEqualTo(id);
     }
 
     @Test
@@ -155,9 +130,8 @@ class SummarizerServiceTest {
         when(repository.findById(id)).thenReturn(Optional.of(e));
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        UpdateSummarizerRequest req = new UpdateSummarizerRequest();
-        req.setEnabled(false);
-        assertThat(service.update(id, req).getEnabled()).isFalse();
+        UpdateSummarizerRequest req = new UpdateSummarizerRequest(null, null, null, null, false);
+        assertThat(service.update(id, req).enabled()).isFalse();
     }
 
     @Test
@@ -173,9 +147,7 @@ class SummarizerServiceTest {
                 .updatedAt(OffsetDateTime.MIN)
                 .build();
         when(repository.findById(id)).thenReturn(Optional.of(e));
-        UpdateSummarizerRequest req = new UpdateSummarizerRequest();
-        req.setProvider("EXTERNAL");
-        req.setBaseUrl("noscheme");
+        UpdateSummarizerRequest req = new UpdateSummarizerRequest("EXTERNAL", "noscheme", null, null, null);
         assertThatThrownBy(() -> service.update(id, req)).isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -192,8 +164,7 @@ class SummarizerServiceTest {
                 .updatedAt(OffsetDateTime.MIN)
                 .build();
         when(repository.findById(id)).thenReturn(Optional.of(e));
-        UpdateSummarizerRequest req = new UpdateSummarizerRequest();
-        req.setModelId(" ");
+        UpdateSummarizerRequest req = new UpdateSummarizerRequest(null, null, " ", null, null);
         assertThatThrownBy(() -> service.update(id, req)).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Model ID");
     }
@@ -213,13 +184,10 @@ class SummarizerServiceTest {
         when(repository.findById(id)).thenReturn(Optional.of(e));
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        UpdateSummarizerRequest req = new UpdateSummarizerRequest();
-        req.setProvider("EXTERNAL");
-        req.setBaseUrl("https://ingest.local/cb");
-        req.setModelId(" ");
+        UpdateSummarizerRequest req = new UpdateSummarizerRequest("EXTERNAL", "https://ingest.local/cb", " ", null, null);
         var dto = service.update(id, req);
-        assertThat(dto.getProvider()).isEqualTo("EXTERNAL");
-        assertThat(dto.getModelId()).isEqualTo("external");
+        assertThat(dto.provider()).isEqualTo("EXTERNAL");
+        assertThat(dto.modelId()).isEqualTo("external");
     }
 
     @Test

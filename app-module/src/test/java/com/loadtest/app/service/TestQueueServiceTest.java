@@ -1,6 +1,7 @@
 package com.loadtest.app.service;
 
 import com.loadtest.app.dto.TestTaskMessage;
+import com.loadtest.app.util.NativeQueryParams;
 import com.loadtest.app.persistence.DockerExecutionProfileEntity;
 import com.loadtest.app.persistence.DockerExecutionProfileRepository;
 import com.loadtest.app.persistence.TestTaskHistoryEntity;
@@ -34,7 +35,6 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -95,33 +95,23 @@ class TestQueueServiceTest {
     }
 
     @Test
-    void rerunFromHistory_delegatesToEnqueue() {
+    void rerunFromHistory_persistsTaskFromHistory() {
         UUID hid = UUID.randomUUID();
         UUID pid = UUID.randomUUID();
         OffsetDateTime t = OffsetDateTime.parse("2024-01-01T00:00:00Z");
-        TestTaskHistoryEntity hist = TestTaskHistoryEntity.builder()
-                .id(hid)
-                .finalStatus("OK")
-                .createdAt(t)
-                .movedAt(t)
-                .testTool("K6")
-                .testFileName("f.js")
-                .testFileContentBase64("QQ==")
-                .command("run")
-                .expectedDurationSeconds(120)
-                .summarizerName("route")
-                .dockerExecutionProfileId(pid)
-                .metricsConfig(null)
-                .build();
+        TestTaskHistoryEntity hist = historyEntity(hid, t, 120, "route", pid, null);
         when(historyRepository.findById(hid)).thenReturn(Optional.of(hist));
+        Query q = stubInsertQuery();
 
-        TestQueueService spy = Mockito.spy(service);
-        doReturn("new-id").when(spy).enqueueTest(
-                eq("K6"), eq("f.js"), eq("QQ=="), eq("run"), eq(120),
-                isNull(), isNull(), eq("route"), eq(pid));
-
-        assertThat(spy.rerunFromHistory(hid, null)).isEqualTo("new-id");
-        verify(spy).enqueueTest(eq("K6"), eq("f.js"), eq("QQ=="), eq("run"), eq(120), isNull(), isNull(), eq("route"), eq(pid));
+        try (var tsm = Mockito.mockStatic(TransactionSynchronizationManager.class)) {
+            tsm.when(TransactionSynchronizationManager::isSynchronizationActive).thenReturn(true);
+            tsm.when(() -> TransactionSynchronizationManager.registerSynchronization(any())).thenAnswer(inv -> null);
+            assertThat(service.rerunFromHistory(hid, null)).isNotBlank();
+            verify(q).setParameter(eq(NativeQueryParams.TEST_TOOL), eq("K6"));
+            verify(q).setParameter(eq(NativeQueryParams.EXPECTED_DURATION_SECONDS), eq(120));
+            verify(q).setParameter(eq(NativeQueryParams.SUMMARIZER_NAME), eq("route"));
+            verify(q).setParameter(eq(NativeQueryParams.DOCKER_PROFILE_ID), eq(pid));
+        }
     }
 
     @Test
@@ -129,26 +119,17 @@ class TestQueueServiceTest {
         UUID hid = UUID.randomUUID();
         UUID pid = UUID.randomUUID();
         OffsetDateTime t = OffsetDateTime.parse("2024-01-01T00:00:00Z");
-        TestTaskHistoryEntity hist = TestTaskHistoryEntity.builder()
-                .id(hid)
-                .finalStatus("OK")
-                .createdAt(t)
-                .movedAt(t)
-                .testTool("K6")
-                .testFileName("f.js")
-                .testFileContentBase64("QQ==")
-                .command("run")
-                .expectedDurationSeconds(null)
-                .summarizerName("route")
-                .dockerExecutionProfileId(pid)
-                .metricsConfig(null)
-                .build();
+        TestTaskHistoryEntity hist = historyEntity(hid, t, null, "route", pid, null);
         when(historyRepository.findById(hid)).thenReturn(Optional.of(hist));
-        TestQueueService spy = Mockito.spy(service);
-        doReturn("id2").when(spy).enqueueTest(
-                eq("K6"), eq("f.js"), eq("QQ=="), eq("run"), eq(60),
-                isNull(), isNull(), eq("override"), eq(pid));
-        assertThat(spy.rerunFromHistory(hid, "override")).isEqualTo("id2");
+        Query q = stubInsertQuery();
+
+        try (var tsm = Mockito.mockStatic(TransactionSynchronizationManager.class)) {
+            tsm.when(TransactionSynchronizationManager::isSynchronizationActive).thenReturn(true);
+            tsm.when(() -> TransactionSynchronizationManager.registerSynchronization(any())).thenAnswer(inv -> null);
+            assertThat(service.rerunFromHistory(hid, "override")).isNotBlank();
+            verify(q).setParameter(eq(NativeQueryParams.EXPECTED_DURATION_SECONDS), eq(60));
+            verify(q).setParameter(eq(NativeQueryParams.SUMMARIZER_NAME), eq("override"));
+        }
     }
 
     @Test
@@ -187,7 +168,7 @@ class TestQueueServiceTest {
             tsm.when(TransactionSynchronizationManager::isSynchronizationActive).thenReturn(true);
             tsm.when(() -> TransactionSynchronizationManager.registerSynchronization(any())).thenAnswer(inv -> null);
             service.enqueueTest("K6", "f.js", "QQ==", "run", 10, null, null, null, null);
-            verify(q).setParameter(eq("dockerProfileId"), eq(fallbackId));
+            verify(q).setParameter(eq(NativeQueryParams.DOCKER_PROFILE_ID), eq(fallbackId));
         }
     }
 
@@ -204,26 +185,17 @@ class TestQueueServiceTest {
         UUID hid = UUID.randomUUID();
         UUID pid = UUID.randomUUID();
         OffsetDateTime t = OffsetDateTime.parse("2024-01-01T00:00:00Z");
-        TestTaskHistoryEntity hist = TestTaskHistoryEntity.builder()
-                .id(hid)
-                .finalStatus("OK")
-                .createdAt(t)
-                .movedAt(t)
-                .testTool("K6")
-                .testFileName("f.js")
-                .testFileContentBase64("QQ==")
-                .command("run")
-                .expectedDurationSeconds(60)
-                .summarizerName("history-route")
-                .dockerExecutionProfileId(pid)
-                .metricsConfig("{}")
-                .build();
+        TestTaskHistoryEntity hist = historyEntity(hid, t, 60, "history-route", pid, "{}");
         when(historyRepository.findById(hid)).thenReturn(Optional.of(hist));
-        TestQueueService spy = Mockito.spy(service);
-        doReturn("id3").when(spy).enqueueTest(
-                eq("K6"), eq("f.js"), eq("QQ=="), eq("run"), eq(60),
-                isNull(), eq("{}"), eq("history-route"), eq(pid));
-        assertThat(spy.rerunFromHistory(hid, "   ")).isEqualTo("id3");
+        Query q = stubInsertQuery();
+
+        try (var tsm = Mockito.mockStatic(TransactionSynchronizationManager.class)) {
+            tsm.when(TransactionSynchronizationManager::isSynchronizationActive).thenReturn(true);
+            tsm.when(() -> TransactionSynchronizationManager.registerSynchronization(any())).thenAnswer(inv -> null);
+            assertThat(service.rerunFromHistory(hid, "   ")).isNotBlank();
+            verify(q).setParameter(eq(NativeQueryParams.METRICS_CONFIG), eq("{}"));
+            verify(q).setParameter(eq(NativeQueryParams.SUMMARIZER_NAME), eq("history-route"));
+        }
     }
 
     @Test
@@ -250,9 +222,9 @@ class TestQueueServiceTest {
             when(queuePauseService.isQueuePaused()).thenReturn(false);
 
             service.enqueueTest("K6", "m.js", null, null, 30, cfg, "{\"a\":1}", "sum", providedProfile);
-            verify(q).setParameter(eq("dockerProfileId"), eq(providedProfile));
-            verify(q).setParameter(eq("command"), eq(""));
-            verify(q).setParameter(eq("metricsConfig"), eq("{\"a\":1}"));
+            verify(q).setParameter(eq(NativeQueryParams.DOCKER_PROFILE_ID), eq(providedProfile));
+            verify(q).setParameter(eq(NativeQueryParams.COMMAND), eq(""));
+            verify(q).setParameter(eq(NativeQueryParams.METRICS_CONFIG), eq("{\"a\":1}"));
             assertThat(sync.get()).isNotNull();
             sync.get().afterCommit();
         }
@@ -279,17 +251,40 @@ class TestQueueServiceTest {
             when(queuePauseService.isQueuePaused()).thenReturn(false);
 
             service.enqueueTest("K6", "n.js", "QQ==", "run", 30, cfg, null, null, providedProfile);
-            verify(q).setParameter(eq("metricsConfig"), isNull());
+            verify(q).setParameter(eq(NativeQueryParams.METRICS_CONFIG), isNull());
             assertThat(sync.get()).isNotNull();
             sync.get().afterCommit();
         }
     }
 
-    private void runEnqueueAfterCommit(boolean paused) {
+    private Query stubInsertQuery() {
         Query q = mock(Query.class);
         when(entityManager.createNativeQuery(contains("INSERT INTO test_task"))).thenReturn(q);
         when(q.setParameter(anyString(), any())).thenReturn(q);
         when(q.executeUpdate()).thenReturn(1);
+        return q;
+    }
+
+    private static TestTaskHistoryEntity historyEntity(UUID hid, OffsetDateTime t, Integer expectedDurationSeconds,
+                                                       String summarizerName, UUID profileId, String metricsConfig) {
+        return TestTaskHistoryEntity.builder()
+                .id(hid)
+                .finalStatus("OK")
+                .createdAt(t)
+                .movedAt(t)
+                .testTool("K6")
+                .testFileName("f.js")
+                .testFileContentBase64("QQ==")
+                .command("run")
+                .expectedDurationSeconds(expectedDurationSeconds)
+                .summarizerName(summarizerName)
+                .dockerExecutionProfileId(profileId)
+                .metricsConfig(metricsConfig)
+                .build();
+    }
+
+    private void runEnqueueAfterCommit(boolean paused) {
+        stubInsertQuery();
         UUID profileId = UUID.randomUUID();
         when(dockerExecutionProfileRepository.findFirstByNameAndEnabledTrue(anyString()))
                 .thenReturn(Optional.of(DockerExecutionProfileEntity.builder()

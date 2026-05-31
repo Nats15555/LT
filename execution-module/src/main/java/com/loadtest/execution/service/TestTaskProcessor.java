@@ -10,11 +10,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.UUID;
 
 @Slf4j
 @Service
@@ -30,80 +32,107 @@ public class TestTaskProcessor {
         return savedFilePath != null && Files.exists(savedFilePath);
     }
 
-    public TaskProcessOutcome process(TestTaskMessage message) throws Exception {
+    public TaskProcessOutcome process(TestTaskMessage message) {
+        logTaskDetails(message);
+        Path savedFilePath = null;
+        try {
+            validateProcessMessage(message);
+            savedFilePath = saveDecodedTestFile(message);
+            return executeTestTask(message, savedFilePath);
+        } catch (IOException e) {
+            throw new TestTaskProcessException("Failed to prepare or run test task " + message.taskId(), e);
+        } finally {
+            deleteTemporaryTestFileQuietly(savedFilePath);
+        }
+    }
+
+    private void logTaskDetails(TestTaskMessage message) {
         log.info("=== Processing test task from Postgres queue ===");
-        log.info("TaskId: {}", message.getTaskId());
-        log.info("Tool: {}", message.getTestTool());
-        log.info("FileName: {}", message.getTestFileName());
+        log.info("TaskId: {}", message.taskId());
+        log.info("Tool: {}", message.testTool());
+        log.info("FileName: {}", message.testFileName());
         log.info("FileContent size: {} chars (Base64)",
-                message.getTestFileContent() != null ? message.getTestFileContent().length() : 0);
-        if (message.getMetricsConfig() != null) {
-            var metricsConfig = message.getMetricsConfig();
+                message.testFileContent() != null ? message.testFileContent().length() : 0);
+        if (message.metricsConfig() != null) {
+            var metricsConfig = message.metricsConfig();
             log.info("MetricsConfig: CONFIGURED, delaySeconds={}, requests={}",
-                    metricsConfig.getDelaySeconds(),
-                    metricsConfig.getRequests() != null ? metricsConfig.getRequests().size() : 0);
+                    metricsConfig.delaySeconds(),
+                    metricsConfig.requests() != null ? metricsConfig.requests().size() : 0);
         } else {
             log.info("MetricsConfig: NOT CONFIGURED");
         }
         log.info("=====================================");
+    }
 
-        Path savedFilePath = null;
+    private static void validateProcessMessage(TestTaskMessage message) {
+        if (message.testFileName() == null || message.testFileName().trim().isEmpty()) {
+            throw new IllegalArgumentException("Test file name is required");
+        }
+        if (message.testFileContent() == null || message.testFileContent().trim().isEmpty()) {
+            throw new IllegalArgumentException("Test file content is required");
+        }
+        if (message.expectedDurationSeconds() == null || message.expectedDurationSeconds() < 1) {
+            throw new IllegalArgumentException("expectedDurationSeconds is required and must be at least 1 (from upload)");
+        }
+        if (message.dockerExecutionProfileId() == null || message.dockerExecutionProfileId().isBlank()) {
+            throw new IllegalArgumentException("dockerExecutionProfileId is required on task message");
+        }
+    }
+
+    private Path saveDecodedTestFile(TestTaskMessage message) throws IOException {
+        byte[] fileBytes = Base64.getDecoder().decode(message.testFileContent());
+        log.info("Decoded file content: {} bytes (from Base64: {} chars)",
+                fileBytes.length, message.testFileContent().length());
+
+        Path uploadPath = Paths.get(uploadDir);
+        if (!Files.exists(uploadPath)) {
+            Files.createDirectories(uploadPath);
+        }
+
+        Path savedFilePath = uploadPath.resolve(message.testFileName());
+        Files.write(savedFilePath, fileBytes);
+        log.info("✓ Test file saved to: {} ({} bytes)", savedFilePath.toAbsolutePath(), fileBytes.length);
+        return savedFilePath;
+    }
+
+    private TaskProcessOutcome executeTestTask(TestTaskMessage message, Path savedFilePath) {
+        ExecutionRequest request = new ExecutionRequest(
+                message.testTool(),
+                message.command(),
+                savedFilePath.toAbsolutePath().toString(),
+                UUID.fromString(message.taskId()),
+                message.expectedDurationSeconds(),
+                UUID.fromString(message.dockerExecutionProfileId()));
+
+        long testStartTime = System.currentTimeMillis();
+        ExecutionResponse response = executionService.executeTestWithAutoCleanup(request);
+        long testEndTime = System.currentTimeMillis();
+
+        log.info("Test task {} completed successfully. Execution time: {}s. Metrics time range: {} .. {}",
+                message.taskId(),
+                response.executionTime(),
+                Instant.ofEpochMilli(testStartTime),
+                Instant.ofEpochMilli(testEndTime));
+
+        return new TaskProcessOutcome(response, testStartTime, testEndTime);
+    }
+
+    private void deleteTemporaryTestFileQuietly(Path savedFilePath) {
+        if (!shouldDeleteTemporaryTestFile(savedFilePath)) {
+            return;
+        }
         try {
-            if (message.getTestFileName() == null || message.getTestFileName().trim().isEmpty()) {
-                throw new IllegalArgumentException("Test file name is required");
-            }
-            if (message.getTestFileContent() == null || message.getTestFileContent().trim().isEmpty()) {
-                throw new IllegalArgumentException("Test file content is required");
-            }
-            if (message.getExpectedDurationSeconds() == null || message.getExpectedDurationSeconds() < 1) {
-                throw new IllegalArgumentException("expectedDurationSeconds is required and must be at least 1 (from upload)");
-            }
+            Files.delete(savedFilePath);
+            log.debug("Temporary test file deleted: {}", savedFilePath);
+        } catch (IOException e) {
+            log.warn("Failed to delete temporary test file: {}", savedFilePath, e);
+        }
+    }
 
-            byte[] fileBytes = Base64.getDecoder().decode(message.getTestFileContent());
-            log.info("Decoded file content: {} bytes (from Base64: {} chars)",
-                    fileBytes.length, message.getTestFileContent().length());
+    public static class TestTaskProcessException extends RuntimeException {
 
-            Path uploadPath = Paths.get(uploadDir);
-            if (!Files.exists(uploadPath)) {
-                Files.createDirectories(uploadPath);
-            }
-
-            savedFilePath = uploadPath.resolve(message.getTestFileName());
-            Files.write(savedFilePath, fileBytes);
-            log.info("✓ Test file saved to: {} ({} bytes)", savedFilePath.toAbsolutePath(), fileBytes.length);
-
-            ExecutionRequest request = new ExecutionRequest();
-            request.setTestTool(message.getTestTool());
-            request.setCommand(message.getCommand());
-            request.setTestFilePath(savedFilePath.toAbsolutePath().toString());
-            request.setTaskId(java.util.UUID.fromString(message.getTaskId()));
-            request.setExpectedDurationSeconds(message.getExpectedDurationSeconds());
-            if (message.getDockerExecutionProfileId() == null || message.getDockerExecutionProfileId().isBlank()) {
-                throw new IllegalArgumentException("dockerExecutionProfileId is required on task message");
-            }
-            request.setDockerExecutionProfileId(java.util.UUID.fromString(message.getDockerExecutionProfileId()));
-
-            long testStartTime = System.currentTimeMillis();
-            ExecutionResponse response = executionService.executeTestWithAutoCleanup(request);
-            long testEndTime = System.currentTimeMillis();
-
-            log.info("Test task {} completed successfully. Execution time: {}s. Metrics time range: {} .. {}",
-                    message.getTaskId(),
-                    response.getExecutionTime(),
-                    Instant.ofEpochMilli(testStartTime),
-                    Instant.ofEpochMilli(testEndTime));
-
-            return new TaskProcessOutcome(response, testStartTime, testEndTime);
-        } finally {
-            if (shouldDeleteTemporaryTestFile(savedFilePath)) {
-                try {
-                    Files.delete(savedFilePath);
-                    log.debug("Temporary test file deleted: {}", savedFilePath);
-                } catch (Exception e) {
-                    log.warn("Failed to delete temporary test file: {}", savedFilePath, e);
-                }
-            }
+        public TestTaskProcessException(String message, Throwable cause) {
+            super(message, cause);
         }
     }
 }
-

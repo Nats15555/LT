@@ -50,7 +50,7 @@ class ContainerExecutionServicePredicatesTest {
 
     @Test
     void dockerBuildFailureOsHint_whenOverrideNonWindows_hintConditionFalse() {
-        ContainerExecutionService.setDockerBuildFailureOsNameOverrideForTests("Linux");
+        ContainerExecutionService.setDockerBuildFailureOsNameOverrideForTests();
         assertThat(ContainerExecutionService.shouldLogWindowsDockerDesktopHint(
                 ContainerExecutionService.dockerBuildFailureOsNameForHint())).isFalse();
     }

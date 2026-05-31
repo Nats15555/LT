@@ -6,15 +6,17 @@ import com.loadtest.app.dto.UpdateDockerProfileRequest;
 import com.loadtest.app.persistence.DockerExecutionProfileEntity;
 import com.loadtest.app.persistence.DockerExecutionProfileRepository;
 import com.loadtest.app.persistence.TestTaskRepository;
+import com.loadtest.app.util.ApiMessages;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
-import java.util.stream.Collectors;
+import java.util.function.Consumer;
 
 @Slf4j
 @Service
@@ -33,54 +35,56 @@ public class DockerExecutionProfileService {
             try {
                 id = UUID.fromString(dockerExecutionProfileIdParam.trim());
             } catch (IllegalArgumentException ex) {
-                throw new IllegalArgumentException("Invalid dockerExecutionProfileId: " + dockerExecutionProfileIdParam);
+                throw new IllegalArgumentException(
+                        ApiMessages.DockerProfile.invalidDockerExecutionProfileId(dockerExecutionProfileIdParam));
             }
             DockerExecutionProfileEntity p = repository.findById(id)
-                    .orElseThrow(() -> new IllegalArgumentException("dockerExecutionProfileId not found: " + id));
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            ApiMessages.DockerProfile.dockerExecutionProfileIdNotFound(id)));
             if (!p.isEnabled()) {
-                throw new IllegalArgumentException("Docker profile is disabled: " + id);
+                throw new IllegalArgumentException(ApiMessages.DockerProfile.dockerProfileDisabled(id));
             }
             return id;
         }
         return repository.findFirstByNameAndEnabledTrue(DEFAULT_PROFILE_NAME)
-                .or(() -> repository.findFirstByEnabledTrueOrderByCreatedAtAsc())
+                .or(repository::findFirstByEnabledTrueOrderByCreatedAtAsc)
                 .map(DockerExecutionProfileEntity::getId)
-                .orElseThrow(() -> new IllegalStateException("No docker execution profile in database"));
+                .orElseThrow(() -> new IllegalStateException(ApiMessages.DockerProfile.NO_PROFILE_IN_DATABASE));
     }
 
     @Transactional(readOnly = true)
     public List<DockerProfileDto> listProfiles() {
-        return repository.findAllByOrderByNameAsc().stream().map(this::toDto).collect(Collectors.toList());
+        return repository.findAllByOrderByNameAsc().stream().map(this::toDto).toList();
     }
 
     @Transactional(readOnly = true)
     public List<DockerProfileDto> listEnabledProfiles() {
-        return repository.findAllByEnabledTrueOrderByNameAsc().stream().map(this::toDto).collect(Collectors.toList());
+        return repository.findAllByEnabledTrueOrderByNameAsc().stream().map(this::toDto).toList();
     }
 
     @Transactional(readOnly = true)
     public DockerProfileDto getById(UUID id) {
         return repository.findById(id).map(this::toDto)
-                .orElseThrow(() -> new IllegalArgumentException("Profile not found: " + id));
+                .orElseThrow(() -> new IllegalArgumentException(ApiMessages.DockerProfile.profileNotFound(id)));
     }
 
     @Transactional
     public DockerProfileDto create(CreateDockerProfileRequest request) {
         assertNoQueuedTestTasksForDockerMutation();
-        String name = request.getName().trim();
+        String name = request.name().trim();
         if (name.isEmpty()) {
-            throw new IllegalArgumentException("Profile name is required");
+            throw new IllegalArgumentException(ApiMessages.DockerProfile.PROFILE_NAME_REQUIRED);
         }
         if (repository.existsByName(name)) {
-            throw new IllegalStateException("Профиль с именем «" + name + "» уже существует");
+            throw new IllegalStateException(ApiMessages.DockerProfile.profileNameAlreadyExists(name));
         }
         OffsetDateTime now = OffsetDateTime.now();
         DockerExecutionProfileEntity e = DockerExecutionProfileEntity.builder()
                 .id(UUID.randomUUID())
                 .name(name)
-                .dockerHostUri(trimToNull(request.getDockerHostUri()))
-                .namedVolumeForChildBinds(trimToNull(request.getNamedVolumeForChildBinds()))
-                .enabled(request.getEnabled() == null || Boolean.TRUE.equals(request.getEnabled()))
+                .dockerHostUri(trimToNull(request.dockerHostUri()))
+                .namedVolumeForChildBinds(trimToNull(request.namedVolumeForChildBinds()))
+                .enabled(request.enabled() == null || Boolean.TRUE.equals(request.enabled()))
                 .createdAt(now)
                 .updatedAt(now)
                 .build();
@@ -91,123 +95,113 @@ public class DockerExecutionProfileService {
     @Transactional
     public DockerProfileDto update(UUID id, UpdateDockerProfileRequest request) {
         assertNoQueuedTestTasksForDockerMutation();
-        DockerExecutionProfileEntity e = repository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Profile not found: " + id));
-        if (request.getName() != null && !request.getName().isBlank()) {
-            String newName = request.getName().trim();
-            if (!newName.equals(e.getName()) && repository.existsByName(newName)) {
-                throw new IllegalStateException("Профиль с именем «" + newName + "» уже существует");
-            }
-            e.setName(newName);
-        }
-        if (request.getDockerHostUri() != null) {
-            e.setDockerHostUri(trimToNull(request.getDockerHostUri()));
-        }
-        if (request.getNamedVolumeForChildBinds() != null) {
-            e.setNamedVolumeForChildBinds(trimToNull(request.getNamedVolumeForChildBinds()));
-        }
-        if (request.getMemoryLimitMb() != null) {
-            e.setMemoryLimitMb(request.getMemoryLimitMb());
-        }
-        if (request.getMemoryReservationMb() != null) {
-            e.setMemoryReservationMb(request.getMemoryReservationMb());
-        }
-        if (request.getCpuLimit() != null) {
-            e.setCpuLimit(request.getCpuLimit());
-        }
-        if (request.getCpuShares() != null) {
-            e.setCpuShares(request.getCpuShares());
-        }
-        if (request.getMaxConcurrentContainers() != null) {
-            e.setMaxConcurrentContainers(Math.max(1, request.getMaxConcurrentContainers()));
-        }
-        if (request.getNetworkMode() != null) {
-            e.setNetworkMode(request.getNetworkMode());
-        }
-        if (request.getRestartPolicy() != null) {
-            e.setRestartPolicy(request.getRestartPolicy());
-        }
-        if (request.getRestartMaxRetries() != null) {
-            e.setRestartMaxRetries(request.getRestartMaxRetries());
-        }
-        if (request.getLogDriver() != null) {
-            e.setLogDriver(request.getLogDriver());
-        }
-        if (request.getLogMaxSize() != null) {
-            e.setLogMaxSize(request.getLogMaxSize());
-        }
-        if (request.getLogMaxFiles() != null) {
-            e.setLogMaxFiles(request.getLogMaxFiles());
-        }
-        if (request.getEnvironmentVariables() != null) {
-            e.setEnvironmentVariables(request.getEnvironmentVariables());
-        }
-        if (request.getLabels() != null) {
-            e.setLabels(request.getLabels());
-        }
-        if (request.getEnabled() != null) {
-            e.setEnabled(request.getEnabled());
-        }
-        e.setUpdatedAt(OffsetDateTime.now());
-        return toDto(repository.save(e));
+        DockerExecutionProfileEntity entity = repository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException(ApiMessages.DockerProfile.profileNotFound(id)));
+        applyProfileNameUpdate(entity, request);
+        applyProfileFieldUpdates(entity, request);
+        entity.setUpdatedAt(OffsetDateTime.now());
+        return toDto(repository.save(entity));
     }
 
     @Transactional
     public void delete(UUID id) {
         assertNoQueuedTestTasksForDockerMutation();
         DockerExecutionProfileEntity e = repository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Profile not found: " + id));
+                .orElseThrow(() -> new IllegalArgumentException(ApiMessages.DockerProfile.profileNotFound(id)));
         if (DEFAULT_PROFILE_NAME.equals(e.getName())) {
-            throw new IllegalStateException("Нельзя удалить системный профиль «" + e.getName() + "»");
+            throw new IllegalStateException(ApiMessages.DockerProfile.cannotDeleteSystemProfile(e.getName()));
         }
         long queued = testTaskRepository.countByDockerExecutionProfileId(id);
         if (queued > 0) {
-            throw new IllegalStateException("Нельзя удалить профиль: есть задачи в очереди, ссылающиеся на него");
+            throw new IllegalStateException(ApiMessages.DockerProfile.CANNOT_DELETE_WITH_QUEUED_TASKS);
         }
         repository.delete(e);
         log.info("Deleted docker profile {}", id);
     }
 
     private void applyResourceDefaults(CreateDockerProfileRequest request, DockerExecutionProfileEntity e) {
-        e.setMemoryLimitMb(request.getMemoryLimitMb() != null ? request.getMemoryLimitMb() : 512);
-        e.setMemoryReservationMb(request.getMemoryReservationMb() != null ? request.getMemoryReservationMb() : 256);
-        e.setCpuLimit(request.getCpuLimit() != null ? request.getCpuLimit() : java.math.BigDecimal.valueOf(0.5));
-        e.setCpuShares(request.getCpuShares() != null ? request.getCpuShares() : 512);
-        int maxC = request.getMaxConcurrentContainers() != null ? request.getMaxConcurrentContainers() : 1;
+        e.setMemoryLimitMb(request.memoryLimitMb() != null ? request.memoryLimitMb() : 512);
+        e.setMemoryReservationMb(request.memoryReservationMb() != null ? request.memoryReservationMb() : 256);
+        e.setCpuLimit(request.cpuLimit() != null ? request.cpuLimit() : BigDecimal.valueOf(0.5));
+        e.setCpuShares(request.cpuShares() != null ? request.cpuShares() : 512);
+        int maxC = request.maxConcurrentContainers() != null ? request.maxConcurrentContainers() : 1;
         e.setMaxConcurrentContainers(Math.max(1, maxC));
-        e.setNetworkMode(request.getNetworkMode() != null ? request.getNetworkMode() : "loadtest_loadtest-network");
-        e.setRestartPolicy(request.getRestartPolicy() != null ? request.getRestartPolicy() : "no");
-        e.setRestartMaxRetries(request.getRestartMaxRetries());
-        e.setLogDriver(request.getLogDriver() != null ? request.getLogDriver() : "json-file");
-        e.setLogMaxSize(request.getLogMaxSize() != null ? request.getLogMaxSize() : "10m");
-        e.setLogMaxFiles(request.getLogMaxFiles() != null ? request.getLogMaxFiles() : 3);
-        e.setEnvironmentVariables(request.getEnvironmentVariables());
-        e.setLabels(request.getLabels());
+        e.setNetworkMode(request.networkMode() != null ? request.networkMode() : ApiMessages.DockerProfile.DEFAULT_NETWORK_MODE);
+        e.setRestartPolicy(request.restartPolicy() != null ? request.restartPolicy() : ApiMessages.DockerProfile.DEFAULT_RESTART_POLICY);
+        e.setRestartMaxRetries(request.restartMaxRetries());
+        e.setLogDriver(request.logDriver() != null ? request.logDriver() : ApiMessages.DockerProfile.DEFAULT_LOG_DRIVER);
+        e.setLogMaxSize(request.logMaxSize() != null ? request.logMaxSize() : ApiMessages.DockerProfile.DEFAULT_LOG_MAX_SIZE);
+        e.setLogMaxFiles(request.logMaxFiles() != null ? request.logMaxFiles() : 3);
+        e.setEnvironmentVariables(request.environmentVariables());
+        e.setLabels(request.labels());
+    }
+
+    private void applyProfileNameUpdate(DockerExecutionProfileEntity entity, UpdateDockerProfileRequest request) {
+        if (request.name() == null || request.name().isBlank()) {
+            return;
+        }
+        String newName = request.name().trim();
+        if (!newName.equals(entity.getName()) && repository.existsByName(newName)) {
+            throw new IllegalStateException(ApiMessages.DockerProfile.profileNameAlreadyExists(newName));
+        }
+        entity.setName(newName);
+    }
+
+    private void applyProfileFieldUpdates(DockerExecutionProfileEntity entity, UpdateDockerProfileRequest request) {
+        setTrimmedIfPresent(request.dockerHostUri(), entity::setDockerHostUri);
+        setTrimmedIfPresent(request.namedVolumeForChildBinds(), entity::setNamedVolumeForChildBinds);
+        setIfPresent(request.memoryLimitMb(), entity::setMemoryLimitMb);
+        setIfPresent(request.memoryReservationMb(), entity::setMemoryReservationMb);
+        setIfPresent(request.cpuLimit(), entity::setCpuLimit);
+        setIfPresent(request.cpuShares(), entity::setCpuShares);
+        if (request.maxConcurrentContainers() != null) {
+            entity.setMaxConcurrentContainers(Math.max(1, request.maxConcurrentContainers()));
+        }
+        setIfPresent(request.networkMode(), entity::setNetworkMode);
+        setIfPresent(request.restartPolicy(), entity::setRestartPolicy);
+        setIfPresent(request.restartMaxRetries(), entity::setRestartMaxRetries);
+        setIfPresent(request.logDriver(), entity::setLogDriver);
+        setIfPresent(request.logMaxSize(), entity::setLogMaxSize);
+        setIfPresent(request.logMaxFiles(), entity::setLogMaxFiles);
+        setIfPresent(request.environmentVariables(), entity::setEnvironmentVariables);
+        setIfPresent(request.labels(), entity::setLabels);
+        setIfPresent(request.enabled(), entity::setEnabled);
+    }
+
+    private static <T> void setIfPresent(T value, Consumer<T> setter) {
+        if (value != null) {
+            setter.accept(value);
+        }
+    }
+
+    private void setTrimmedIfPresent(String value, Consumer<String> setter) {
+        if (value != null) {
+            setter.accept(trimToNull(value));
+        }
     }
 
     private DockerProfileDto toDto(DockerExecutionProfileEntity entity) {
-        return DockerProfileDto.builder()
-                .id(entity.getId())
-                .name(entity.getName())
-                .dockerHostUri(entity.getDockerHostUri())
-                .namedVolumeForChildBinds(entity.getNamedVolumeForChildBinds())
-                .memoryLimitMb(entity.getMemoryLimitMb())
-                .memoryReservationMb(entity.getMemoryReservationMb())
-                .cpuLimit(entity.getCpuLimit())
-                .cpuShares(entity.getCpuShares())
-                .maxConcurrentContainers(entity.getMaxConcurrentContainers())
-                .networkMode(entity.getNetworkMode())
-                .restartPolicy(entity.getRestartPolicy())
-                .restartMaxRetries(entity.getRestartMaxRetries())
-                .logDriver(entity.getLogDriver())
-                .logMaxSize(entity.getLogMaxSize())
-                .logMaxFiles(entity.getLogMaxFiles())
-                .environmentVariables(entity.getEnvironmentVariables())
-                .labels(entity.getLabels())
-                .enabled(entity.isEnabled())
-                .createdAt(entity.getCreatedAt())
-                .updatedAt(entity.getUpdatedAt())
-                .build();
+        return new DockerProfileDto(
+                entity.getId(),
+                entity.getName(),
+                entity.getDockerHostUri(),
+                entity.getNamedVolumeForChildBinds(),
+                entity.getMemoryLimitMb(),
+                entity.getMemoryReservationMb(),
+                entity.getCpuLimit(),
+                entity.getCpuShares(),
+                entity.getMaxConcurrentContainers(),
+                entity.getNetworkMode(),
+                entity.getRestartPolicy(),
+                entity.getRestartMaxRetries(),
+                entity.getLogDriver(),
+                entity.getLogMaxSize(),
+                entity.getLogMaxFiles(),
+                entity.getEnvironmentVariables(),
+                entity.getLabels(),
+                entity.isEnabled(),
+                entity.getCreatedAt(),
+                entity.getUpdatedAt());
     }
 
     private static String trimToNull(String s) {
@@ -223,9 +217,7 @@ public class DockerExecutionProfileService {
             return;
         }
         if (testTaskRepository.count() > 0) {
-            throw new IllegalStateException(
-                    "Нельзя изменить профили Docker, пока в очереди есть неисполненные задачи (таблица test_task). "
-                            + "Включите паузу очереди или дождитесь завершения прогонов.");
+            throw new IllegalStateException(ApiMessages.DockerProfile.CANNOT_MUTATE_WHILE_QUEUE_HAS_TASKS);
         }
     }
 }

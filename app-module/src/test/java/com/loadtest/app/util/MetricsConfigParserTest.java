@@ -37,30 +37,30 @@ class MetricsConfigParserTest {
     }
 
     @Test
-    void parse_normalizesDelayNameMethod() throws Exception {
+    void parse_normalizesDelayNameMethod() {
         doNothing().when(schemaValidator).validate(any());
         String json = """
                 {"delaySeconds":3,"requests":[{"url":"http://x","method":"","name":""}]}
                 """;
         TestTaskMessage.MetricsConfig cfg = parser.parseMetricsConfigRequests(json);
-        assertThat(cfg.getDelaySeconds()).isEqualTo(3);
-        assertThat(cfg.getRequests()).hasSize(1);
-        assertThat(cfg.getRequests().get(0).getMethod()).isEqualTo("GET");
-        assertThat(cfg.getRequests().get(0).getName()).isEqualTo("http://x");
+        assertThat(cfg.delaySeconds()).isEqualTo(3);
+        assertThat(cfg.requests()).hasSize(1);
+        assertThat(cfg.requests().get(0).method()).isEqualTo("GET");
+        assertThat(cfg.requests().get(0).name()).isEqualTo("http://x");
     }
 
     @Test
-    void parse_defaultDelayWhenNull() throws Exception {
+    void parse_defaultDelayWhenNull() {
         doNothing().when(schemaValidator).validate(any());
         String json = """
                 {"requests":[{"url":"http://y"}]}
                 """;
         TestTaskMessage.MetricsConfig cfg = parser.parseMetricsConfigRequests(json);
-        assertThat(cfg.getDelaySeconds()).isEqualTo(0);
+        assertThat(cfg.delaySeconds()).isZero();
     }
 
     @Test
-    void parse_rejectsEmptyRequestsAfterSchema() throws Exception {
+    void parse_rejectsEmptyRequestsAfterSchema() {
         doNothing().when(schemaValidator).validate(any());
         String json = "{\"requests\":null}";
         assertThatThrownBy(() -> parser.parseMetricsConfigRequests(json))
@@ -69,7 +69,7 @@ class MetricsConfigParserTest {
     }
 
     @Test
-    void parse_rejectsEmptyRequestArrayAfterSchema() throws Exception {
+    void parse_rejectsEmptyRequestArrayAfterSchema() {
         doNothing().when(schemaValidator).validate(any());
         assertThatThrownBy(() -> parser.parseMetricsConfigRequests("{\"requests\":[]}"))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -77,7 +77,7 @@ class MetricsConfigParserTest {
     }
 
     @Test
-    void parse_rejectsMissingUrl() throws Exception {
+    void parse_rejectsMissingUrl() {
         doNothing().when(schemaValidator).validate(any());
         String json = "{\"requests\":[{\"name\":\"n\"}]}";
         assertThatThrownBy(() -> parser.parseMetricsConfigRequests(json))
@@ -92,15 +92,15 @@ class MetricsConfigParserTest {
     }
 
     @Test
-    void parse_normalizesNullDelayAndBlankNameMethod() throws Exception {
+    void parse_normalizesNullDelayAndBlankNameMethod() {
         doNothing().when(schemaValidator).validate(any());
         String json = """
                 {"delaySeconds":null,"requests":[{"url":"http://u","name":"  ","method":"  "}]}
                 """;
         TestTaskMessage.MetricsConfig cfg = parser.parseMetricsConfigRequests(json);
-        assertThat(cfg.getDelaySeconds()).isEqualTo(0);
-        assertThat(cfg.getRequests().get(0).getName()).isEqualTo("http://u");
-        assertThat(cfg.getRequests().get(0).getMethod()).isEqualTo("GET");
+        assertThat(cfg.delaySeconds()).isZero();
+        assertThat(cfg.requests().get(0).name()).isEqualTo("http://u");
+        assertThat(cfg.requests().get(0).method()).isEqualTo("GET");
     }
 
     @Test
@@ -115,24 +115,24 @@ class MetricsConfigParserTest {
     }
 
     @Test
-    void parse_keepsExplicitNameAndMethod() throws Exception {
+    void parse_keepsExplicitNameAndMethod() {
         doNothing().when(schemaValidator).validate(any());
         String json = """
                 {"delaySeconds":1,"requests":[{"url":"http://z","name":"src","method":"POST"}]}
                 """;
         TestTaskMessage.MetricsConfig cfg = parser.parseMetricsConfigRequests(json);
-        assertThat(cfg.getDelaySeconds()).isEqualTo(1);
-        assertThat(cfg.getRequests().get(0).getName()).isEqualTo("src");
-        assertThat(cfg.getRequests().get(0).getMethod()).isEqualTo("POST");
+        assertThat(cfg.delaySeconds()).isEqualTo(1);
+        assertThat(cfg.requests().get(0).name()).isEqualTo("src");
+        assertThat(cfg.requests().get(0).method()).isEqualTo("POST");
     }
 
     @Test
-    void parse_defaultsMethodWhenNull() throws Exception {
+    void parse_defaultsMethodWhenNull() {
         doNothing().when(schemaValidator).validate(any());
         String json = """
                 {"requests":[{"url":"http://z","name":"src","method":null}]}
                 """;
         TestTaskMessage.MetricsConfig cfg = parser.parseMetricsConfigRequests(json);
-        assertThat(cfg.getRequests().get(0).getMethod()).isEqualTo("GET");
+        assertThat(cfg.requests().get(0).method()).isEqualTo("GET");
     }
 }

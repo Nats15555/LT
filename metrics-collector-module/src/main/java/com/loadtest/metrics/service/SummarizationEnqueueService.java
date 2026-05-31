@@ -7,8 +7,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -39,7 +43,7 @@ public class SummarizationEnqueueService {
         UUID taskId;
         try {
             taskId = UUID.fromString(taskIdStr);
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.warn("Invalid taskId for summarization enqueue: {}", taskIdStr);
             return;
         }
@@ -71,17 +75,55 @@ public class SummarizationEnqueueService {
                     externalSummarizationPendingService.failPendingWindow(taskId,
                             "Не удалось отправить пакет во внешний контур (dispatch не выполнен)");
                 }
-            } catch (Exception e) {
+            } catch (RuntimeException e) {
                 log.warn("Failed to register external summarization window for task {}", taskIdStr, e);
             }
             return;
         }
+        String customPrompt = fetchStoredCustomPrompt(taskId).orElse(null);
         try {
-            kafkaOutboxService.sendSummarizationEvent(taskIdStr, new SummarizationTaskEvent(taskIdStr, summarizer));
-            log.info("Enqueued summarization after metrics: taskId={}, summarizer={} (fromDb={})",
-                    taskIdStr, summarizer, fromDb.isPresent());
-        } catch (Exception e) {
+            kafkaOutboxService.sendSummarizationEvent(taskIdStr,
+                    new SummarizationTaskEvent(taskIdStr, summarizer, customPrompt));
+            log.info("Enqueued summarization after metrics: taskId={}, summarizer={} (fromDb={}, customPrompt={})",
+                    taskIdStr, summarizer, fromDb.isPresent(), customPrompt != null);
+        } catch (RuntimeException e) {
             log.warn("Failed to enqueue summarization for task {}", taskIdStr, e);
+        }
+    }
+
+    private Optional<String> fetchStoredCustomPrompt(UUID taskId) {
+        String base = appBaseUrl != null ? appBaseUrl.replaceAll("/$", "") : "";
+        if (base.isBlank()) {
+            return Optional.empty();
+        }
+        String url = base + "/api/v1/loadtest/internal/custom-summarization-prompt/" + taskId;
+        try {
+            return webClient.get()
+                    .uri(url)
+                    .exchangeToMono(response -> {
+                        if (response.statusCode().equals(HttpStatus.NO_CONTENT)) {
+                            return Mono.just(Optional.<String>empty());
+                        }
+                        if (!response.statusCode().is2xxSuccessful()) {
+                            return Mono.just(Optional.<String>empty());
+                        }
+                        return response.bodyToMono(new ParameterizedTypeReference<Map<String, String>>() {})
+                                .map(body -> {
+                                    if (body == null) {
+                                        return Optional.<String>empty();
+                                    }
+                                    String p = body.get("customPrompt");
+                                    if (p == null || p.isBlank()) {
+                                        return Optional.<String>empty();
+                                    }
+                                    return Optional.of(p.trim());
+                                })
+                                .defaultIfEmpty(Optional.empty());
+                    })
+                    .block();
+        } catch (RuntimeException e) {
+            log.debug("No custom summarization prompt for taskId={}: {}", taskId, e.getMessage());
+            return Optional.empty();
         }
     }
 
@@ -100,7 +142,7 @@ public class SummarizationEnqueueService {
                     .block();
             log.info("Triggered external dispatch: taskId={}, response={}", taskId, body != null ? body : "(empty)");
             return true;
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.warn("Failed to trigger external dispatch for taskId={}: {}", taskId, e.getMessage());
             return false;
         }

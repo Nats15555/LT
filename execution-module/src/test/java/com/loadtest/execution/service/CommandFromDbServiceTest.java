@@ -1,6 +1,5 @@
 package com.loadtest.execution.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.dockerjava.api.model.HostConfig;
 import com.github.dockerjava.api.model.LogConfig;
 import com.loadtest.execution.persistence.DockerExecutionProfileEntity;
@@ -44,11 +43,11 @@ class CommandFromDbServiceTest {
 
     @BeforeEach
     void injectConfig() {
-        service = new CommandFromDbService(toolRepository, new ObjectMapper());
+        service = new CommandFromDbService(toolRepository);
         ReflectionTestUtils.setField(service, "workingDir", "");
         ReflectionTestUtils.setField(service, "artifactBasePathFallback", "artifacts");
-        ReflectionTestUtils.setField(service, "artifactReportsSubdirFallback", "reports");
-        ReflectionTestUtils.setField(service, "artifactMetricsSubdirFallback", "metrics");
+        ReflectionTestUtils.setField(service, "artifactReportsSubDirFallback", "reports");
+        ReflectionTestUtils.setField(service, "artifactMetricsSubDirFallback", "metrics");
         ReflectionTestUtils.setField(service, "defaultNetworkName", "");
         ReflectionTestUtils.setField(service, "namedVolumeForChildBinds", "");
     }

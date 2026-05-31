@@ -2,7 +2,10 @@ package com.loadtest.app.util;
 
 import org.springframework.web.multipart.MultipartFile;
 
-public class FileValidationHelper {
+public final class FileValidationHelper {
+
+    private FileValidationHelper() {
+    }
 
     public static String getFileExtension(String fileName) {
         if (fileName == null) {

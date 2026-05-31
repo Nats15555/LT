@@ -146,7 +146,7 @@ class TestTaskExecutionServiceTest {
                         .maxConcurrentContainers(4)
                         .build()));
 
-        ExecutionResponse resp = ExecutionResponse.builder().status("success").executionTime(3L).build();
+        ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 3L, null, null);
         when(processor.process(any(TestTaskMessage.class)))
                 .thenReturn(new TaskProcessOutcome(resp, 100L, 200L));
 
@@ -269,7 +269,7 @@ class TestTaskExecutionServiceTest {
                         .maxConcurrentContainers(4)
                         .build()));
 
-        ExecutionResponse resp = ExecutionResponse.builder().status("success").executionTime(3L).build();
+        ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 3L, null, null);
         when(processor.process(any(TestTaskMessage.class)))
                 .thenReturn(new TaskProcessOutcome(resp, 100L, 200L));
 
@@ -362,7 +362,7 @@ class TestTaskExecutionServiceTest {
                         .maxConcurrentContainers(4)
                         .build()));
 
-        ExecutionResponse resp = ExecutionResponse.builder().status("success").executionTime(3L).build();
+        ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 3L, null, null);
         when(processor.process(any(TestTaskMessage.class)))
                 .thenReturn(new TaskProcessOutcome(resp, 100L, 200L));
 
@@ -420,7 +420,7 @@ class TestTaskExecutionServiceTest {
                         .maxConcurrentContainers(4)
                         .build()));
 
-        ExecutionResponse resp = ExecutionResponse.builder().status("success").executionTime(3L).build();
+        ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 3L, null, null);
         when(processor.process(any(TestTaskMessage.class)))
                 .thenReturn(new TaskProcessOutcome(resp, 1L, 2L));
 
@@ -429,7 +429,7 @@ class TestTaskExecutionServiceTest {
         assertThat(r.getKind()).isEqualTo(TestTaskRunResult.Kind.COMPLETED);
         org.mockito.ArgumentCaptor<TestTaskMessage> cap = org.mockito.ArgumentCaptor.forClass(TestTaskMessage.class);
         verify(processor).process(cap.capture());
-        assertThat(cap.getValue().getMetricsConfig()).isNull();
+        assertThat(cap.getValue().metricsConfig()).isNull();
     }
 
     @Test
@@ -471,7 +471,7 @@ class TestTaskExecutionServiceTest {
                 .build();
         when(historyRepository.findById(taskId)).thenReturn(Optional.of(history));
 
-        ExecutionResponse resp = ExecutionResponse.builder().status("success").executionTime(3L).build();
+        ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 3L, null, null);
         when(processor.process(any(TestTaskMessage.class)))
                 .thenReturn(new TaskProcessOutcome(resp, 1L, 2L));
 
@@ -513,7 +513,7 @@ class TestTaskExecutionServiceTest {
         doThrow(new RuntimeException("db")).when(historyRepository).save(any(TestTaskHistoryEntity.class));
 
         assertThatThrownBy(() -> service.execute(new TestTaskEvent(taskId.toString())))
-                .isInstanceOf(RuntimeException.class)
+                .isInstanceOf(TestTaskHistoryException.class)
                 .hasMessageContaining("Cannot create history record");
     }
 
@@ -572,7 +572,7 @@ class TestTaskExecutionServiceTest {
                 .build();
         when(historyRepository.findById(taskId)).thenReturn(Optional.of(history));
 
-        ExecutionResponse resp = ExecutionResponse.builder().status("success").executionTime(3L).build();
+        ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 3L, null, null);
         when(processor.process(any(TestTaskMessage.class)))
                 .thenReturn(new TaskProcessOutcome(resp, 1L, 2L));
 
@@ -618,7 +618,7 @@ class TestTaskExecutionServiceTest {
                 .build();
         when(historyRepository.findById(taskId)).thenReturn(Optional.of(history));
 
-        ExecutionResponse resp = ExecutionResponse.builder().status("success").executionTime(3L).build();
+        ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 3L, null, null);
         when(processor.process(any(TestTaskMessage.class)))
                 .thenReturn(new TaskProcessOutcome(resp, 1L, 2L));
 
@@ -693,7 +693,7 @@ class TestTaskExecutionServiceTest {
                         .maxConcurrentContainers(4)
                         .build()));
 
-        ExecutionResponse resp = ExecutionResponse.builder().status("success").executionTime(3L).build();
+        ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 3L, null, null);
         when(processor.process(any(TestTaskMessage.class)))
                 .thenReturn(new TaskProcessOutcome(resp, 1L, 2L));
 
@@ -761,7 +761,7 @@ class TestTaskExecutionServiceTest {
                         .maxConcurrentContainers(4)
                         .build()));
 
-        ExecutionResponse resp = ExecutionResponse.builder().status("success").executionTime(3L).build();
+        ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 3L, null, null);
         when(processor.process(any(TestTaskMessage.class)))
                 .thenReturn(new TaskProcessOutcome(resp, 1L, 2L));
 
@@ -876,7 +876,7 @@ class TestTaskExecutionServiceTest {
                         .maxConcurrentContainers(4)
                         .build()));
 
-        ExecutionResponse resp = ExecutionResponse.builder().status("success").executionTime(3L).build();
+        ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 3L, null, null);
         when(processor.process(any(TestTaskMessage.class)))
                 .thenReturn(new TaskProcessOutcome(resp, 1L, 2L));
 
@@ -1031,7 +1031,7 @@ class TestTaskExecutionServiceTest {
                 .dockerExecutionProfileId(histProfileId)
                 .build()));
 
-        ExecutionResponse resp = ExecutionResponse.builder().status("success").executionTime(3L).build();
+        ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 3L, null, null);
         when(processor.process(any(TestTaskMessage.class)))
                 .thenReturn(new TaskProcessOutcome(resp, 1L, 2L));
 
@@ -1039,7 +1039,7 @@ class TestTaskExecutionServiceTest {
 
         ArgumentCaptor<TestTaskMessage> cap = ArgumentCaptor.forClass(TestTaskMessage.class);
         verify(processor).process(cap.capture());
-        assertThat(cap.getValue().getDockerExecutionProfileId()).isNull();
+        assertThat(cap.getValue().dockerExecutionProfileId()).isNull();
     }
 
     @Test
@@ -1088,7 +1088,7 @@ class TestTaskExecutionServiceTest {
                         .maxConcurrentContainers(4)
                         .build()));
 
-        ExecutionResponse resp = ExecutionResponse.builder().status("success").executionTime(3L).build();
+        ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 3L, null, null);
         when(processor.process(any(TestTaskMessage.class)))
                 .thenReturn(new TaskProcessOutcome(resp, 1L, 2L));
 
@@ -1096,7 +1096,7 @@ class TestTaskExecutionServiceTest {
 
         ArgumentCaptor<TestTaskMessage> cap = ArgumentCaptor.forClass(TestTaskMessage.class);
         verify(processor).process(cap.capture());
-        assertThat(cap.getValue().getMetricsConfig()).isNull();
+        assertThat(cap.getValue().metricsConfig()).isNull();
     }
 
     @Test
@@ -1138,7 +1138,7 @@ class TestTaskExecutionServiceTest {
                 .build();
         when(historyRepository.findById(taskId)).thenReturn(Optional.of(history));
 
-        ExecutionResponse resp = ExecutionResponse.builder().status("success").executionTime(3L).build();
+        ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 3L, null, null);
         when(processor.process(any(TestTaskMessage.class)))
                 .thenReturn(new TaskProcessOutcome(resp, 1L, 2L));
 
@@ -1314,7 +1314,7 @@ class TestTaskExecutionServiceTest {
                 .build();
         when(historyRepository.findById(taskId)).thenReturn(Optional.of(history));
 
-        ExecutionResponse resp = ExecutionResponse.builder().status("success").executionTime(3L).build();
+        ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 3L, null, null);
         when(processor.process(any(TestTaskMessage.class)))
                 .thenReturn(new TaskProcessOutcome(resp, 1L, 2L));
 
@@ -1378,7 +1378,7 @@ class TestTaskExecutionServiceTest {
                 .build();
         when(historyRepository.findById(taskId)).thenReturn(Optional.of(history));
 
-        ExecutionResponse resp = ExecutionResponse.builder().status("success").executionTime(3L).build();
+        ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 3L, null, null);
         when(processor.process(any(TestTaskMessage.class)))
                 .thenReturn(new TaskProcessOutcome(resp, 1L, 2L));
 
@@ -1434,7 +1434,7 @@ class TestTaskExecutionServiceTest {
                         .maxConcurrentContainers(4)
                         .build()));
 
-        ExecutionResponse resp = ExecutionResponse.builder().status("success").executionTime(3L).build();
+        ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 3L, null, null);
         when(processor.process(any(TestTaskMessage.class)))
                 .thenReturn(new TaskProcessOutcome(resp, 1L, 2L));
 

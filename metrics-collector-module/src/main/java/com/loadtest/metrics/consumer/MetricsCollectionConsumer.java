@@ -32,27 +32,27 @@ public class MetricsCollectionConsumer {
     )
     public void consume(MetricsCollectionEvent event, Acknowledgment acknowledgment) {
         log.info("Received metrics collection event: taskId={}, testStart={}, testEnd={}",
-                event.getTaskId(), event.getTestStartTime(), event.getTestEndTime());
+                event.taskId(), event.testStartTime(), event.testEndTime());
 
         try {
             Optional<MetricsCollectionRequest> requestOpt = requestBuilder.tryBuildFromEvent(event);
             if (requestOpt.isEmpty()) {
-                summarizationEnqueueService.enqueueAfterMetricsSaved(event.getTaskId());
+                summarizationEnqueueService.enqueueAfterMetricsSaved(event.taskId());
                 acknowledgment.acknowledge();
                 return;
             }
             MetricsCollectionRequest request = requestOpt.get();
             MetricsCollectionResponse response = metricsCollectionService.collectMetrics(request);
-            int savedRows = testMetricsWriter.saveMetrics(event.getTaskId(), request, response);
+            int savedRows = testMetricsWriter.saveMetrics(event.taskId(), request, response);
             if (savedRows == 0) {
                 log.warn("No rows written to test_metrics for taskId={} (check HTTP URLs, host-overrides, Prometheus/ES); summarization may still be enqueued if summarizer is set",
-                        event.getTaskId());
+                        event.taskId());
             }
-            summarizationEnqueueService.enqueueAfterMetricsSaved(event.getTaskId());
+            summarizationEnqueueService.enqueueAfterMetricsSaved(event.taskId());
             acknowledgment.acknowledge();
-        } catch (Exception e) {
-            log.error("Error processing metrics collection for taskId: {}", event.getTaskId(), e);
-            summarizationEnqueueService.enqueueAfterMetricsSaved(event.getTaskId());
+        } catch (RuntimeException e) {
+            log.error("Error processing metrics collection for taskId: {}", event.taskId(), e);
+            summarizationEnqueueService.enqueueAfterMetricsSaved(event.taskId());
             acknowledgment.acknowledge();
         }
     }

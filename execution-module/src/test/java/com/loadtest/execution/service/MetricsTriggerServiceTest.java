@@ -11,7 +11,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
@@ -40,41 +39,40 @@ class MetricsTriggerServiceTest {
 
     @Test
     void triggerFromMessage_skipsWhenMetricsConfigNull() {
-        TestTaskMessage msg = TestTaskMessage.builder().taskId("t-null-cfg").build();
+        TestTaskMessage msg = new TestTaskMessage("t-null-cfg", null, null, null, null, null, null, null, null, null);
         metricsTriggerService.triggerMetricsCollection(msg, 1L, 2L);
         verify(kafkaOutboxService, never()).sendMetricsCollectionEvent(any(), any());
     }
 
     @Test
     void triggerFromMessage_skipsWhenRequestsNull() {
-        TestTaskMessage.MetricsConfig cfg = new TestTaskMessage.MetricsConfig();
-        cfg.setRequests(null);
-        TestTaskMessage msg = TestTaskMessage.builder().taskId("t-req-null").metricsConfig(cfg).build();
+        TestTaskMessage.MetricsConfig cfg = new TestTaskMessage.MetricsConfig(0, null);
+        TestTaskMessage msg = new TestTaskMessage("t-req-null", null, null, null, null, null, null, null, cfg, null);
         metricsTriggerService.triggerMetricsCollection(msg, 1L, 2L);
         verify(kafkaOutboxService, never()).sendMetricsCollectionEvent(any(), any());
     }
 
     @Test
     void triggerFromMessage_skipsWhenRequestsEmpty() {
-        TestTaskMessage.MetricsConfig cfg = new TestTaskMessage.MetricsConfig();
-        cfg.setRequests(List.of());
-        TestTaskMessage msg = TestTaskMessage.builder().taskId("t-empty-req").metricsConfig(cfg).build();
+        TestTaskMessage.MetricsConfig cfg = new TestTaskMessage.MetricsConfig(0, List.of());
+        TestTaskMessage msg = new TestTaskMessage("t-empty-req", null, null, null, null, null, null, null, cfg, null);
         metricsTriggerService.triggerMetricsCollection(msg, 1L, 2L);
         verify(kafkaOutboxService, never()).sendMetricsCollectionEvent(any(), any());
     }
 
     @Test
     void triggerFromMessage_skipsWhenNoRequests() {
-        TestTaskMessage msg = TestTaskMessage.builder().taskId("t").metricsConfig(new TestTaskMessage.MetricsConfig()).build();
+        TestTaskMessage msg = new TestTaskMessage(
+                "t", null, null, null, null, null, null, null, new TestTaskMessage.MetricsConfig(0, null), null);
         metricsTriggerService.triggerMetricsCollection(msg, 1L, 2L);
         verify(kafkaOutboxService, never()).sendMetricsCollectionEvent(any(), any());
     }
 
     @Test
     void triggerFromMessage_sendsWhenRequestsPresent() {
-        TestTaskMessage.MetricsConfig cfg = new TestTaskMessage.MetricsConfig();
-        cfg.setRequests(List.of(new TestTaskMessage.MetricsConfig.MetricsRequest("x", "GET", "http://h", null, null, null)));
-        TestTaskMessage msg = TestTaskMessage.builder().taskId("t3").metricsConfig(cfg).build();
+        TestTaskMessage.MetricsConfig cfg = new TestTaskMessage.MetricsConfig(
+                0, List.of(new TestTaskMessage.MetricsConfig.MetricsRequest("x", "GET", "http://h", null, null, null)));
+        TestTaskMessage msg = new TestTaskMessage("t3", null, null, null, null, null, null, null, cfg, null);
         metricsTriggerService.triggerMetricsCollection(msg, 5L, 6L);
         verify(kafkaOutboxService).sendMetricsCollectionEvent(eq("t3"), any(MetricsCollectionEvent.class));
     }

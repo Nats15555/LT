@@ -1,8 +1,8 @@
 package com.loadtest.summarization.persistence;
 
 import lombok.Data;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.io.ByteArrayInputStream;
@@ -16,26 +16,20 @@ import java.util.zip.GZIPInputStream;
 
 @Slf4j
 @Repository
+@RequiredArgsConstructor
 public class TaskArtifactsRepository {
 
-    private final JdbcTemplate jdbcTemplate;
-
-    public TaskArtifactsRepository(JdbcTemplate jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
-    }
+    private final TestArtifactJpaRepository testArtifactJpaRepository;
 
     public List<ArtifactContent> findArtifactsByTaskId(UUID taskId) {
-        String sql = "SELECT id, file_name, content_encoding, file_content FROM test_artifacts WHERE task_id = ? ORDER BY file_name";
         List<ArtifactContent> result = new ArrayList<>();
-        jdbcTemplate.query(sql, rs -> {
-            String fileName = rs.getString("file_name");
-            String encoding = rs.getString("content_encoding");
-            byte[] content = rs.getBytes("file_content");
+        for (TestArtifactEntity entity : testArtifactJpaRepository.findByTaskIdOrderByFileName(taskId)) {
+            byte[] content = entity.getFileContent();
             if (content != null) {
-                String text = decodeContent(content, "gzip".equalsIgnoreCase(encoding));
-                result.add(new ArtifactContent(fileName, text));
+                String text = decodeContent(content, "gzip".equalsIgnoreCase(entity.getContentEncoding()));
+                result.add(new ArtifactContent(entity.getFileName(), text));
             }
-        }, taskId);
+        }
         return result;
     }
 
@@ -49,7 +43,7 @@ public class TaskArtifactsRepository {
                     while ((n = gis.read(buf)) > 0) {
                         out.write(buf, 0, n);
                     }
-                    return out.toString(StandardCharsets.UTF_8.name());
+                    return out.toString(StandardCharsets.UTF_8);
                 }
             }
             return new String(content, StandardCharsets.UTF_8);

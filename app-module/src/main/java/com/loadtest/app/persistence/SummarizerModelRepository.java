@@ -10,6 +10,8 @@ import java.util.UUID;
 @Repository
 public interface SummarizerModelRepository extends JpaRepository<SummarizerModelEntity, UUID> {
     Optional<SummarizerModelEntity> findByName(String name);
+
     List<SummarizerModelEntity> findByEnabledTrue();
+
     boolean existsByName(String name);
 }

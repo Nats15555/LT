@@ -2,7 +2,9 @@ package com.loadtest.app.controller;
 
 import com.loadtest.app.dto.LoadTestToolDto;
 import com.loadtest.app.dto.SummarizerModelDto;
+import com.loadtest.app.service.CustomSummarizationPromptStore;
 import com.loadtest.app.service.DockerExecutionProfileService;
+import com.loadtest.app.service.LoadTestUploadService;
 import com.loadtest.app.service.LoadTestToolService;
 import com.loadtest.app.service.SummarizerService;
 import com.loadtest.app.service.TestQueueService;
@@ -11,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.annotation.Import;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -29,8 +32,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static com.loadtest.app.testsupport.MockMvcTestSupport.perform;
 
 @WebMvcTest(controllers = LoadTestController.class)
+@Import(LoadTestUploadService.class)
 class LoadTestControllerWebMvcTest {
 
     @Autowired
@@ -46,18 +51,20 @@ class LoadTestControllerWebMvcTest {
     private SummarizerService summarizerService;
     @MockBean
     private DockerExecutionProfileService dockerExecutionProfileService;
+    @MockBean
+    private CustomSummarizationPromptStore customSummarizationPromptStore;
 
     @Test
-    void metricsConfigSchema_returnsJsonFile() throws Exception {
-        mockMvc.perform(get("/api/v1/loadtest/metrics-config-schema"))
+    void metricsConfigSchema_returnsJsonFile() {
+        perform(mockMvc, get("/api/v1/loadtest/metrics-config-schema"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("\"$schema\"")));
     }
 
     @Test
-    void upload_rejectsBlankCommand() throws Exception {
+    void upload_rejectsBlankCommand() {
         var file = new MockMultipartFile("file", "x.js", "application/octet-stream", "code".getBytes());
-        mockMvc.perform(multipart("/api/v1/loadtest/upload")
+        perform(mockMvc, multipart("/api/v1/loadtest/upload")
                         .file(file)
                         .param("tool", "K6")
                         .param("command", "   ")
@@ -67,9 +74,9 @@ class LoadTestControllerWebMvcTest {
     }
 
     @Test
-    void upload_rejectsInvalidDuration() throws Exception {
+    void upload_rejectsInvalidDuration() {
         var file = new MockMultipartFile("file", "x.js", "application/octet-stream", "code".getBytes());
-        mockMvc.perform(multipart("/api/v1/loadtest/upload")
+        perform(mockMvc, multipart("/api/v1/loadtest/upload")
                         .file(file)
                         .param("tool", "K6")
                         .param("command", "run")
@@ -79,16 +86,8 @@ class LoadTestControllerWebMvcTest {
     }
 
     @Test
-    void upload_acceptsMinimalRequest() throws Exception {
-        when(loadTestToolService.getToolByName("K6")).thenReturn(LoadTestToolDto.builder()
-                .id(UUID.randomUUID())
-                .name("K6")
-                .dockerImage("k6")
-                .fileExtensions(List.of(".js"))
-                .enabled(true)
-                .createdAt(OffsetDateTime.MIN)
-                .updatedAt(OffsetDateTime.MIN)
-                .build());
+    void upload_acceptsMinimalRequest() {
+        when(loadTestToolService.getToolByName("K6")).thenReturn(k6Tool());
         UUID profileId = UUID.randomUUID();
         when(dockerExecutionProfileService.resolveProfileIdForUpload(isNull())).thenReturn(profileId);
         when(testQueueService.enqueueTest(
@@ -104,7 +103,7 @@ class LoadTestControllerWebMvcTest {
                 .thenReturn("new-task-id");
 
         var file = new MockMultipartFile("file", "load.js", "application/octet-stream", "export default function() {}".getBytes());
-        mockMvc.perform(multipart("/api/v1/loadtest/upload")
+        perform(mockMvc, multipart("/api/v1/loadtest/upload")
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "k6 run {fileName}")
@@ -115,10 +114,10 @@ class LoadTestControllerWebMvcTest {
     }
 
     @Test
-    void upload_toolNotFound() throws Exception {
+    void upload_toolNotFound() {
         when(loadTestToolService.getToolByName("K6")).thenThrow(new IllegalArgumentException("missing"));
         var file = new MockMultipartFile("file", "x.js", "application/octet-stream", "c".getBytes());
-        mockMvc.perform(multipart("/api/v1/loadtest/upload")
+        perform(mockMvc, multipart("/api/v1/loadtest/upload")
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "run")
@@ -129,18 +128,11 @@ class LoadTestControllerWebMvcTest {
     }
 
     @Test
-    void upload_toolDisabled() throws Exception {
-        when(loadTestToolService.getToolByName("K6")).thenReturn(LoadTestToolDto.builder()
-                .id(UUID.randomUUID())
-                .name("K6")
-                .dockerImage("k6")
-                .fileExtensions(List.of(".js"))
-                .enabled(false)
-                .createdAt(OffsetDateTime.MIN)
-                .updatedAt(OffsetDateTime.MIN)
-                .build());
+    void upload_toolDisabled() {
+        when(loadTestToolService.getToolByName("K6")).thenReturn(new LoadTestToolDto(
+                UUID.randomUUID(), "K6", "k6", List.of(".js"), false, OffsetDateTime.MIN, OffsetDateTime.MIN));
         var file = new MockMultipartFile("file", "x.js", "application/octet-stream", "c".getBytes());
-        mockMvc.perform(multipart("/api/v1/loadtest/upload")
+        perform(mockMvc, multipart("/api/v1/loadtest/upload")
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "run")
@@ -150,11 +142,11 @@ class LoadTestControllerWebMvcTest {
     }
 
     @Test
-    void upload_summarizerNotFound() throws Exception {
+    void upload_summarizerNotFound() {
         stubEnabledK6Tool();
         when(summarizerService.getByName("missing")).thenThrow(new IllegalArgumentException("nope"));
         var file = new MockMultipartFile("file", "x.js", "application/octet-stream", "c".getBytes());
-        mockMvc.perform(multipart("/api/v1/loadtest/upload")
+        perform(mockMvc, multipart("/api/v1/loadtest/upload")
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "run")
@@ -165,12 +157,12 @@ class LoadTestControllerWebMvcTest {
     }
 
     @Test
-    void upload_invalidMetricsJson() throws Exception {
+    void upload_invalidMetricsJson() {
         stubEnabledK6Tool();
         when(dockerExecutionProfileService.resolveProfileIdForUpload(isNull())).thenReturn(UUID.randomUUID());
         when(metricsConfigParser.parseMetricsConfigRequests(anyString())).thenThrow(new IllegalArgumentException("bad"));
         var file = new MockMultipartFile("file", "x.js", "application/octet-stream", "c".getBytes());
-        mockMvc.perform(multipart("/api/v1/loadtest/upload")
+        perform(mockMvc, multipart("/api/v1/loadtest/upload")
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "run")
@@ -182,7 +174,7 @@ class LoadTestControllerWebMvcTest {
     }
 
     @Test
-    void upload_metricsConfigParsedWithNullRequests_stillAccepted() throws Exception {
+    void upload_metricsConfigParsedWithNullRequests_stillAccepted() {
         stubEnabledK6Tool();
         when(dockerExecutionProfileService.resolveProfileIdForUpload(isNull())).thenReturn(UUID.randomUUID());
         when(metricsConfigParser.parseMetricsConfigRequests(anyString()))
@@ -199,7 +191,7 @@ class LoadTestControllerWebMvcTest {
                         any(UUID.class)))
                 .thenReturn("tid-m");
         var file = new MockMultipartFile("file", "x.js", "application/octet-stream", "c".getBytes());
-        mockMvc.perform(multipart("/api/v1/loadtest/upload")
+        perform(mockMvc, multipart("/api/v1/loadtest/upload")
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "run")
@@ -210,10 +202,10 @@ class LoadTestControllerWebMvcTest {
     }
 
     @Test
-    void upload_rejectsFileWithoutExtension() throws Exception {
+    void upload_rejectsFileWithoutExtension() {
         stubEnabledK6Tool();
         var file = new MockMultipartFile("file", "noext", "application/octet-stream", "c".getBytes());
-        mockMvc.perform(multipart("/api/v1/loadtest/upload")
+        perform(mockMvc, multipart("/api/v1/loadtest/upload")
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "run")
@@ -223,18 +215,10 @@ class LoadTestControllerWebMvcTest {
     }
 
     @Test
-    void upload_rejectsExtensionMismatch() throws Exception {
-        when(loadTestToolService.getToolByName("K6")).thenReturn(LoadTestToolDto.builder()
-                .id(UUID.randomUUID())
-                .name("K6")
-                .dockerImage("k6")
-                .fileExtensions(List.of(".js"))
-                .enabled(true)
-                .createdAt(OffsetDateTime.MIN)
-                .updatedAt(OffsetDateTime.MIN)
-                .build());
+    void upload_rejectsExtensionMismatch() {
+        when(loadTestToolService.getToolByName("K6")).thenReturn(k6Tool());
         var file = new MockMultipartFile("file", "test.py", "application/octet-stream", "c".getBytes());
-        mockMvc.perform(multipart("/api/v1/loadtest/upload")
+        perform(mockMvc, multipart("/api/v1/loadtest/upload")
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "run")
@@ -244,19 +228,12 @@ class LoadTestControllerWebMvcTest {
     }
 
     @Test
-    void upload_rejectsDisabledSummarizerAndExternalBadUrl() throws Exception {
+    void upload_rejectsDisabledSummarizerAndExternalBadUrl() {
         stubEnabledK6Tool();
-        when(summarizerService.getByName("route")).thenReturn(SummarizerModelDto.builder()
-                .id(UUID.randomUUID())
-                .name("route")
-                .provider("OPENAI")
-                .modelId("m")
-                .enabled(false)
-                .createdAt(OffsetDateTime.MIN)
-                .updatedAt(OffsetDateTime.MIN)
-                .build());
+        when(summarizerService.getByName("route")).thenReturn(new SummarizerModelDto(
+                UUID.randomUUID(), "route", "OPENAI", null, "m", null, false, OffsetDateTime.MIN, OffsetDateTime.MIN));
         var file = new MockMultipartFile("file", "x.js", "application/octet-stream", "c".getBytes());
-        mockMvc.perform(multipart("/api/v1/loadtest/upload")
+        perform(mockMvc, multipart("/api/v1/loadtest/upload")
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "run")
@@ -264,17 +241,9 @@ class LoadTestControllerWebMvcTest {
                         .param("summarizer", "route"))
                 .andExpect(status().isBadRequest());
 
-        when(summarizerService.getByName("route")).thenReturn(SummarizerModelDto.builder()
-                .id(UUID.randomUUID())
-                .name("route")
-                .provider("EXTERNAL")
-                .baseUrl("ftp://bad")
-                .modelId("m")
-                .enabled(true)
-                .createdAt(OffsetDateTime.MIN)
-                .updatedAt(OffsetDateTime.MIN)
-                .build());
-        mockMvc.perform(multipart("/api/v1/loadtest/upload")
+        when(summarizerService.getByName("route")).thenReturn(new SummarizerModelDto(
+                UUID.randomUUID(), "route", "EXTERNAL", "ftp://bad", "m", null, true, OffsetDateTime.MIN, OffsetDateTime.MIN));
+        perform(mockMvc, multipart("/api/v1/loadtest/upload")
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "run")
@@ -285,19 +254,12 @@ class LoadTestControllerWebMvcTest {
     }
 
     @Test
-    void upload_rejectsSummarizerWithNullEnabled() throws Exception {
+    void upload_rejectsSummarizerWithNullEnabled() {
         stubEnabledK6Tool();
-        when(summarizerService.getByName("route")).thenReturn(SummarizerModelDto.builder()
-                .id(UUID.randomUUID())
-                .name("route")
-                .provider("OPENAI")
-                .modelId("m")
-                .enabled(null)
-                .createdAt(OffsetDateTime.MIN)
-                .updatedAt(OffsetDateTime.MIN)
-                .build());
+        when(summarizerService.getByName("route")).thenReturn(new SummarizerModelDto(
+                UUID.randomUUID(), "route", "OPENAI", null, "m", null, null, OffsetDateTime.MIN, OffsetDateTime.MIN));
         var file = new MockMultipartFile("file", "x.js", "application/octet-stream", "c".getBytes());
-        mockMvc.perform(multipart("/api/v1/loadtest/upload")
+        perform(mockMvc, multipart("/api/v1/loadtest/upload")
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "run")
@@ -307,20 +269,12 @@ class LoadTestControllerWebMvcTest {
     }
 
     @Test
-    void upload_externalSummarizerWithoutBaseUrl() throws Exception {
+    void upload_externalSummarizerWithoutBaseUrl() {
         stubEnabledK6Tool();
-        when(summarizerService.getByName("route")).thenReturn(SummarizerModelDto.builder()
-                .id(UUID.randomUUID())
-                .name("route")
-                .provider("EXTERNAL")
-                .baseUrl(" ")
-                .modelId("m")
-                .enabled(true)
-                .createdAt(OffsetDateTime.MIN)
-                .updatedAt(OffsetDateTime.MIN)
-                .build());
+        when(summarizerService.getByName("route")).thenReturn(new SummarizerModelDto(
+                UUID.randomUUID(), "route", "EXTERNAL", " ", "m", null, true, OffsetDateTime.MIN, OffsetDateTime.MIN));
         var file = new MockMultipartFile("file", "x.js", "application/octet-stream", "c".getBytes());
-        mockMvc.perform(multipart("/api/v1/loadtest/upload")
+        perform(mockMvc, multipart("/api/v1/loadtest/upload")
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "run")
@@ -331,11 +285,11 @@ class LoadTestControllerWebMvcTest {
     }
 
     @Test
-    void upload_returns500OnUnexpectedException() throws Exception {
+    void upload_returns500OnUnexpectedException() {
         stubEnabledK6Tool();
         when(dockerExecutionProfileService.resolveProfileIdForUpload(isNull())).thenThrow(new RuntimeException("boom"));
         var file = new MockMultipartFile("file", "x.js", "application/octet-stream", "c".getBytes());
-        mockMvc.perform(multipart("/api/v1/loadtest/upload")
+        perform(mockMvc, multipart("/api/v1/loadtest/upload")
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "run")
@@ -345,7 +299,7 @@ class LoadTestControllerWebMvcTest {
     }
 
     @Test
-    void upload_returns400OnIllegalArgumentException() throws Exception {
+    void upload_returns400OnIllegalArgumentException() {
         stubEnabledK6Tool();
         when(dockerExecutionProfileService.resolveProfileIdForUpload(isNull())).thenReturn(UUID.randomUUID());
         when(testQueueService.enqueueTest(
@@ -353,7 +307,7 @@ class LoadTestControllerWebMvcTest {
                 isNull(), isNull(), isNull(), any(UUID.class)))
                 .thenThrow(new IllegalArgumentException("bad request"));
         var file = new MockMultipartFile("file", "x.js", "application/octet-stream", "c".getBytes());
-        mockMvc.perform(multipart("/api/v1/loadtest/upload")
+        perform(mockMvc, multipart("/api/v1/loadtest/upload")
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "run")
@@ -363,10 +317,10 @@ class LoadTestControllerWebMvcTest {
     }
 
     @Test
-    void upload_rejectsInvalidFileBeforeEnqueue() throws Exception {
+    void upload_rejectsInvalidFileBeforeEnqueue() {
         stubEnabledK6Tool();
         var file = new MockMultipartFile("file", "x.js", "application/octet-stream", new byte[0]);
-        mockMvc.perform(multipart("/api/v1/loadtest/upload")
+        perform(mockMvc, multipart("/api/v1/loadtest/upload")
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "run")
@@ -376,17 +330,10 @@ class LoadTestControllerWebMvcTest {
     }
 
     @Test
-    void upload_withSummarizer_ok() throws Exception {
+    void upload_withSummarizer_ok() {
         stubEnabledK6Tool();
-        when(summarizerService.getByName("route")).thenReturn(SummarizerModelDto.builder()
-                .id(UUID.randomUUID())
-                .name("route")
-                .provider("OPENAI")
-                .modelId("m")
-                .enabled(true)
-                .createdAt(OffsetDateTime.MIN)
-                .updatedAt(OffsetDateTime.MIN)
-                .build());
+        when(summarizerService.getByName("route")).thenReturn(new SummarizerModelDto(
+                UUID.randomUUID(), "route", "OPENAI", null, "m", null, true, OffsetDateTime.MIN, OffsetDateTime.MIN));
         UUID profileId = UUID.randomUUID();
         when(dockerExecutionProfileService.resolveProfileIdForUpload(isNull())).thenReturn(profileId);
         when(testQueueService.enqueueTest(
@@ -402,7 +349,7 @@ class LoadTestControllerWebMvcTest {
                 .thenReturn("tid");
 
         var file = new MockMultipartFile("file", "x.js", "application/octet-stream", "c".getBytes());
-        mockMvc.perform(multipart("/api/v1/loadtest/upload")
+        perform(mockMvc, multipart("/api/v1/loadtest/upload")
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "run")
@@ -413,14 +360,11 @@ class LoadTestControllerWebMvcTest {
     }
 
     private void stubEnabledK6Tool() {
-        when(loadTestToolService.getToolByName("K6")).thenReturn(LoadTestToolDto.builder()
-                .id(UUID.randomUUID())
-                .name("K6")
-                .dockerImage("k6")
-                .fileExtensions(List.of(".js"))
-                .enabled(true)
-                .createdAt(OffsetDateTime.MIN)
-                .updatedAt(OffsetDateTime.MIN)
-                .build());
+        when(loadTestToolService.getToolByName("K6")).thenReturn(k6Tool());
+    }
+
+    private static LoadTestToolDto k6Tool() {
+        return new LoadTestToolDto(
+                UUID.randomUUID(), "K6", "k6", List.of(".js"), true, OffsetDateTime.MIN, OffsetDateTime.MIN);
     }
 }

@@ -6,5 +6,4 @@ import java.util.List;
 import java.util.UUID;
 
 public interface TestArtifactRepository extends JpaRepository<TestArtifactEntity, UUID> {
-    List<TestArtifactEntity> findByTaskId(UUID taskId);
 }

@@ -14,27 +14,23 @@ public class MetricsTriggerService {
     private final KafkaOutboxService kafkaOutboxService;
 
     public void triggerMetricsCollectionForTaskId(String taskId, long testStartTime, long testEndTime) {
-        MetricsCollectionEvent event = MetricsCollectionEvent.builder()
-                .taskId(taskId)
-                .testStartTime(testStartTime)
-                .testEndTime(testEndTime)
-                .build();
+        MetricsCollectionEvent event = new MetricsCollectionEvent(taskId, testStartTime, testEndTime);
         try {
             kafkaOutboxService.sendMetricsCollectionEvent(taskId, event);
             log.info("Metrics collection event queued for Kafka/outbox taskId: {} (testStart={}, testEnd={})",
                     taskId, testStartTime, testEndTime);
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.error("Failed to queue metrics collection event for taskId: {}", taskId, e);
         }
     }
 
     public void triggerMetricsCollection(TestTaskMessage taskMessage, Long testStartTime, Long testEndTime) {
-        if (taskMessage.getMetricsConfig() == null
-                || taskMessage.getMetricsConfig().getRequests() == null
-                || taskMessage.getMetricsConfig().getRequests().isEmpty()) {
-            log.info("No metrics collection configured for taskId: {}, skipping", taskMessage.getTaskId());
+        if (taskMessage.metricsConfig() == null
+                || taskMessage.metricsConfig().requests() == null
+                || taskMessage.metricsConfig().requests().isEmpty()) {
+            log.info("No metrics collection configured for taskId: {}, skipping", taskMessage.taskId());
             return;
         }
-        triggerMetricsCollectionForTaskId(taskMessage.getTaskId(), testStartTime, testEndTime);
+        triggerMetricsCollectionForTaskId(taskMessage.taskId(), testStartTime, testEndTime);
     }
 }

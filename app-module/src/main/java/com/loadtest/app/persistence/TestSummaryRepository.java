@@ -20,5 +20,5 @@ public interface TestSummaryRepository extends JpaRepository<TestSummaryEntity, 
     @Modifying
     @Transactional
     @Query("delete from TestSummaryEntity t where t.taskId = :taskId and t.processingStatus = :status")
-    int deleteByTaskIdAndProcessingStatus(@Param("taskId") UUID taskId, @Param("status") String status);
+    void deleteByTaskIdAndProcessingStatus(@Param("taskId") UUID taskId, @Param("status") String status);
 }

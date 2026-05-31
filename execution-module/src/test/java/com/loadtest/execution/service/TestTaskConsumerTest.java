@@ -39,13 +39,11 @@ class TestTaskConsumerTest {
     @Test
     void completed_run_triggersMetricsWhenRequestsPresent() {
         UUID taskId = UUID.randomUUID();
-        TestTaskMessage.MetricsConfig cfg = new TestTaskMessage.MetricsConfig();
-        cfg.setRequests(List.of(new TestTaskMessage.MetricsConfig.MetricsRequest("p", "GET", "http://u", null, null, null)));
-        TestTaskMessage msg = TestTaskMessage.builder()
-                .taskId(taskId.toString())
-                .metricsConfig(cfg)
-                .build();
-        ExecutionResponse resp = ExecutionResponse.builder().status("success").executionTime(1L).build();
+        TestTaskMessage.MetricsConfig cfg = new TestTaskMessage.MetricsConfig(
+                0, List.of(new TestTaskMessage.MetricsConfig.MetricsRequest("p", "GET", "http://u", null, null, null)));
+        TestTaskMessage msg = new TestTaskMessage(
+                taskId.toString(), null, null, null, null, null, null, null, cfg, null);
+        ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 1L, null, null);
         TaskProcessOutcome outcome = new TaskProcessOutcome(resp, 10L, 20L);
         when(testTaskExecutionService.execute(any()))
                 .thenReturn(TestTaskRunResult.completed(msg, outcome, false));
@@ -59,10 +57,8 @@ class TestTaskConsumerTest {
     @Test
     void completed_triggersMetricsWhenHasNonEmptyMetricsRequestsFlagEvenIfMessageHasNoRequests() {
         UUID taskId = UUID.randomUUID();
-        TestTaskMessage msg = TestTaskMessage.builder()
-                .taskId(taskId.toString())
-                .build();
-        ExecutionResponse resp = ExecutionResponse.builder().status("success").executionTime(1L).build();
+        TestTaskMessage msg = new TestTaskMessage(taskId.toString(), null, null, null, null, null, null, null, null, null);
+        ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 1L, null, null);
         TaskProcessOutcome outcome = new TaskProcessOutcome(resp, 5L, 6L);
         when(testTaskExecutionService.execute(any()))
                 .thenReturn(TestTaskRunResult.completed(msg, outcome, true));
@@ -76,8 +72,8 @@ class TestTaskConsumerTest {
     @Test
     void completed_noMetricsWhenNoRequestsAndFlagFalse() {
         UUID taskId = UUID.randomUUID();
-        TestTaskMessage msg = TestTaskMessage.builder().taskId(taskId.toString()).build();
-        ExecutionResponse resp = ExecutionResponse.builder().status("success").executionTime(1L).build();
+        TestTaskMessage msg = new TestTaskMessage(taskId.toString(), null, null, null, null, null, null, null, null, null);
+        ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 1L, null, null);
         TaskProcessOutcome outcome = new TaskProcessOutcome(resp, 1L, 2L);
         when(testTaskExecutionService.execute(any()))
                 .thenReturn(TestTaskRunResult.completed(msg, outcome, false));
@@ -91,7 +87,7 @@ class TestTaskConsumerTest {
     @Test
     void completed_nullMessage_shortCircuitsParsedRequests_noMetricsWhenFlagFalse() {
         UUID taskId = UUID.randomUUID();
-        ExecutionResponse resp = ExecutionResponse.builder().status("success").executionTime(1L).build();
+        ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 1L, null, null);
         TaskProcessOutcome outcome = new TaskProcessOutcome(resp, 1L, 2L);
         TestTaskRunResult result = mock(TestTaskRunResult.class);
         when(result.getKind()).thenReturn(TestTaskRunResult.Kind.COMPLETED);
@@ -110,14 +106,10 @@ class TestTaskConsumerTest {
     @Test
     void completed_metricsConfigPresent_requestsNull_noMetricsWhenFlagFalse() {
         UUID taskId = UUID.randomUUID();
-        TestTaskMessage.MetricsConfig cfg = new TestTaskMessage.MetricsConfig();
-        cfg.setDelaySeconds(1);
-        cfg.setRequests(null);
-        TestTaskMessage msg = TestTaskMessage.builder()
-                .taskId(taskId.toString())
-                .metricsConfig(cfg)
-                .build();
-        ExecutionResponse resp = ExecutionResponse.builder().status("success").executionTime(1L).build();
+        TestTaskMessage.MetricsConfig cfg = new TestTaskMessage.MetricsConfig(1, null);
+        TestTaskMessage msg = new TestTaskMessage(
+                taskId.toString(), null, null, null, null, null, null, null, cfg, null);
+        ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 1L, null, null);
         TaskProcessOutcome outcome = new TaskProcessOutcome(resp, 3L, 4L);
         when(testTaskExecutionService.execute(any()))
                 .thenReturn(TestTaskRunResult.completed(msg, outcome, false));

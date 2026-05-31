@@ -51,8 +51,8 @@ class MetricsCollectionRequestBuilderTest {
         )));
         var ok = builder.tryBuildFromEvent(event);
         assertThat(ok).isPresent();
-        assertThat(ok.get().getDelaySeconds()).isEqualTo(2);
-        assertThat(ok.get().getRequests()).hasSize(1);
+        assertThat(ok.get().delaySeconds()).isEqualTo(2);
+        assertThat(ok.get().requests()).hasSize(1);
     }
 
     @Test
@@ -76,7 +76,7 @@ class MetricsCollectionRequestBuilderTest {
         ));
         var built = builder.tryBuildFromEvent(event);
         assertThat(built).isPresent();
-        assertThat(built.get().getDelaySeconds()).isEqualTo(0);
+        assertThat(built.get().delaySeconds()).isEqualTo(0);
     }
 
     @Test

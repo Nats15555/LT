@@ -10,6 +10,8 @@ import java.util.UUID;
 @Repository
 public interface LoadTestToolRepository extends JpaRepository<LoadTestToolEntity, UUID> {
     Optional<LoadTestToolEntity> findByName(String name);
+
     List<LoadTestToolEntity> findByEnabledTrue();
+
     boolean existsByName(String name);
 }

@@ -1,12 +1,14 @@
 package com.loadtest.execution.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.dockerjava.api.model.Bind;
 import com.github.dockerjava.api.model.HostConfig;
+import com.github.dockerjava.api.model.LogConfig;
+import com.github.dockerjava.api.model.RestartPolicy;
 import com.github.dockerjava.api.model.Volume;
 import com.loadtest.execution.persistence.DockerExecutionProfileEntity;
 import com.loadtest.execution.persistence.LoadTestToolEntity;
 import com.loadtest.execution.persistence.LoadTestToolRepository;
+import com.loadtest.execution.util.ExecutionPlaceholderKeys;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,27 +21,30 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class CommandFromDbService {
 
+    private static final Pattern REPORT_PLACEHOLDER = Pattern.compile("\\{reportBaseName}([^\\s/\\\\]*)");
+    private static final Pattern METRICS_PLACEHOLDER = Pattern.compile("\\{metricsBaseName}([^\\s/\\\\]*)");
+
     private final LoadTestToolRepository toolRepository;
-    private final ObjectMapper objectMapper;
 
     @Value("${file.storage.working-dir:}")
     private String workingDir;
     @Value("${file.storage.artifact-base-path:artifacts}")
     private String artifactBasePathFallback;
     @Value("${file.storage.artifact-reports-subdir:reports}")
-    private String artifactReportsSubdirFallback;
+    private String artifactReportsSubDirFallback;
     @Value("${file.storage.artifact-metrics-subdir:metrics}")
-    private String artifactMetricsSubdirFallback;
+    private String artifactMetricsSubDirFallback;
     @Value("${container.default-network:}")
     private String defaultNetworkName;
 
@@ -53,12 +58,12 @@ public class CommandFromDbService {
     }
 
     public ArtifactPaths resolveArtifactPaths() {
-        java.nio.file.Path base = (workingDir != null && !workingDir.isBlank())
+        Path base = (workingDir != null && !workingDir.isBlank())
                 ? Paths.get(workingDir).toAbsolutePath().normalize()
                 : Paths.get(".").toAbsolutePath().normalize();
-        String reportsPath = base.resolve(artifactBasePathFallback).resolve(artifactReportsSubdirFallback).toString();
-        String metricsPath = base.resolve(artifactBasePathFallback).resolve(artifactMetricsSubdirFallback).toString();
-        return new ArtifactPaths(reportsPath, metricsPath, artifactReportsSubdirFallback, artifactMetricsSubdirFallback);
+        String reportsPath = base.resolve(artifactBasePathFallback).resolve(artifactReportsSubDirFallback).toString();
+        String metricsPath = base.resolve(artifactBasePathFallback).resolve(artifactMetricsSubDirFallback).toString();
+        return new ArtifactPaths(reportsPath, metricsPath, artifactReportsSubDirFallback, artifactMetricsSubDirFallback);
     }
 
     public List<String> buildCommand(String command, Map<String, String> placeholders) {
@@ -67,7 +72,7 @@ public class CommandFromDbService {
         }
         Map<String, String> all = new LinkedHashMap<>(placeholders != null ? placeholders : Map.of());
         String line = substitute(command, all);
-        return Arrays.stream(line.split("\\s+")).filter(s -> !s.isEmpty()).collect(Collectors.toList());
+        return Arrays.stream(line.split("\\s+")).filter(s -> !s.isEmpty()).toList();
     }
 
     private static String substitute(String s, Map<String, String> placeholders) {
@@ -78,16 +83,13 @@ public class CommandFromDbService {
         return s;
     }
 
-    private static final Pattern REPORT_PLACEHOLDER = Pattern.compile("\\{reportBaseName\\}([^\\s/\\\\]*)");
-    private static final Pattern METRICS_PLACEHOLDER = Pattern.compile("\\{metricsBaseName\\}([^\\s/\\\\]*)");
-
     public List<String> deriveArtifactFilePathsFromCommand(String commandTemplate, Map<String, String> placeholders) {
         List<String> hostPaths = new ArrayList<>();
         if (commandTemplate == null || commandTemplate.isBlank() || placeholders == null) return hostPaths;
-        String reportsHostPath = placeholders.getOrDefault("reportsHostPath", "").replace("\\", "/").replaceAll("/+$", "");
-        String metricsHostPath = placeholders.getOrDefault("metricsHostPath", "").replace("\\", "/").replaceAll("/+$", "");
-        String reportBase = placeholders.getOrDefault("reportBaseName", "");
-        String metricsBase = placeholders.getOrDefault("metricsBaseName", reportBase);
+        String reportsHostPath = placeholders.getOrDefault(ExecutionPlaceholderKeys.REPORTS_HOST_PATH, "").replace("\\", "/").replaceAll("/+$", "");
+        String metricsHostPath = placeholders.getOrDefault(ExecutionPlaceholderKeys.METRICS_HOST_PATH, "").replace("\\", "/").replaceAll("/+$", "");
+        String reportBase = placeholders.getOrDefault(ExecutionPlaceholderKeys.REPORT_BASE_NAME, "");
+        String metricsBase = placeholders.getOrDefault(ExecutionPlaceholderKeys.METRICS_BASE_NAME, reportBase);
         for (Matcher m = REPORT_PLACEHOLDER.matcher(commandTemplate); m.find(); ) {
             String suffix = m.group(1);
             String fileName = reportBase + suffix;
@@ -105,34 +107,31 @@ public class CommandFromDbService {
         return hostPaths;
     }
 
-    public java.util.Optional<String> namedVolumeForChildBinds() {
+    public Optional<String> namedVolumeForChildBinds() {
         if (namedVolumeForChildBinds == null || namedVolumeForChildBinds.isBlank()) {
-            return java.util.Optional.empty();
+            return Optional.empty();
         }
-        return java.util.Optional.of(namedVolumeForChildBinds.trim());
+        return Optional.of(namedVolumeForChildBinds.trim());
     }
 
     public List<Bind> buildBinds(Map<String, String> placeholders) {
-        return buildBindsUsingHostPaths(placeholders, java.util.Optional.empty());
+        return buildBindsUsingHostPaths(placeholders, Optional.empty());
     }
 
-    public List<Bind> buildBindsUsingHostPaths(Map<String, String> placeholders, java.util.Optional<String> namedVolumeHostMountpoint) {
+    public List<Bind> buildBindsUsingHostPaths(Map<String, String> placeholders, Optional<String> namedVolumeHostMountpoint) {
         List<Bind> binds = new ArrayList<>();
         if (placeholders == null) {
             return binds;
         }
-        java.util.function.Function<String, String> hostPathOrSame = containerSidePath -> {
+        Function<String, String> hostPathOrSame = containerSidePath -> {
             if (containerSidePath == null || containerSidePath.isBlank()) {
                 return null;
             }
-            if (namedVolumeHostMountpoint.isEmpty()) {
-                return containerSidePath;
-            }
-            return mapPathUnderWorkingDirToHostVolumeMountpoint(containerSidePath, namedVolumeHostMountpoint.get());
+            return namedVolumeHostMountpoint.map(s -> mapPathUnderWorkingDirToHostVolumeMountpoint(containerSidePath, s)).orElse(containerSidePath);
         };
-        String testPath = hostPathOrSame.apply(placeholders.get("testFileHostPath"));
-        String reportsPath = hostPathOrSame.apply(placeholders.get("reportsHostPath"));
-        String metricsPath = hostPathOrSame.apply(placeholders.get("metricsHostPath"));
+        String testPath = hostPathOrSame.apply(placeholders.get(ExecutionPlaceholderKeys.TEST_FILE_HOST_PATH));
+        String reportsPath = hostPathOrSame.apply(placeholders.get(ExecutionPlaceholderKeys.REPORTS_HOST_PATH));
+        String metricsPath = hostPathOrSame.apply(placeholders.get(ExecutionPlaceholderKeys.METRICS_HOST_PATH));
         if (hasBindableHostPath(testPath)) {
             binds.add(new Bind(testPath, new Volume("/mnt/test")));
         }
@@ -180,60 +179,103 @@ public class CommandFromDbService {
     }
 
     public HostConfig applyDockerProfile(HostConfig base, DockerExecutionProfileEntity config) {
-        HostConfig h = base != null ? base : HostConfig.newHostConfig();
+        HostConfig hostConfig = base != null ? base : HostConfig.newHostConfig();
+        applyMemorySettings(hostConfig, config);
+        applyCpuSettings(hostConfig, config);
+        applyNetworkMode(hostConfig, config);
+        applyRestartPolicy(hostConfig, config);
+        applyLogDriver(hostConfig, config);
+        return hostConfig;
+    }
 
+    private void applyMemorySettings(HostConfig hostConfig, DockerExecutionProfileEntity config) {
         if (config.getMemoryLimitMb() != null && config.getMemoryLimitMb() > 0) {
-            h.withMemory((long) config.getMemoryLimitMb() * 1024 * 1024);
+            hostConfig.withMemory((long) config.getMemoryLimitMb() * 1024 * 1024);
         }
         if (config.getMemoryReservationMb() != null && config.getMemoryReservationMb() > 0) {
-            h.withMemoryReservation((long) config.getMemoryReservationMb() * 1024 * 1024);
+            hostConfig.withMemoryReservation((long) config.getMemoryReservationMb() * 1024 * 1024);
         }
+    }
+
+    private void applyCpuSettings(HostConfig hostConfig, DockerExecutionProfileEntity config) {
         if (config.getCpuLimit() != null && config.getCpuLimit().doubleValue() > 0) {
             try {
-                h.withCpuQuota((long) (config.getCpuLimit().doubleValue() * 100_000));
-                h.withCpuPeriod(100_000L);
-            } catch (Exception e) {
+                hostConfig.withCpuQuota((long) (config.getCpuLimit().doubleValue() * 100_000));
+                hostConfig.withCpuPeriod(100_000L);
+            } catch (RuntimeException e) {
                 log.debug("CPU limit not applied: {}", e.getMessage());
             }
         }
         if (config.getCpuShares() != null && config.getCpuShares() > 0) {
-            h.withCpuShares(config.getCpuShares());
+            hostConfig.withCpuShares(config.getCpuShares());
         }
-        String network = (config.getNetworkMode() != null && !config.getNetworkMode().isBlank())
-                ? config.getNetworkMode()
-                : (defaultNetworkName != null && !defaultNetworkName.isBlank() ? defaultNetworkName : null);
-        if (network != null) {
-            h.withNetworkMode(network);
-        }
-        if (config.getRestartPolicy() != null && !config.getRestartPolicy().isBlank()) {
-            try {
-                com.github.dockerjava.api.model.RestartPolicy policy = com.github.dockerjava.api.model.RestartPolicy
-                        .parse(config.getRestartPolicy());
-                h.withRestartPolicy(policy);
-            } catch (Exception e) {
-                log.debug("Restart policy not applied: {}", e.getMessage());
-            }
-        }
-        if (config.getLogDriver() != null && !config.getLogDriver().isBlank()) {
-            Map<String, String> logOpts = new java.util.HashMap<>();
-            if (config.getLogMaxSize() != null) logOpts.put("max-size", config.getLogMaxSize());
-            if (config.getLogMaxFiles() != null) logOpts.put("max-file", String.valueOf(config.getLogMaxFiles()));
-            try {
-                h.withLogConfig(new com.github.dockerjava.api.model.LogConfig(
-                        com.github.dockerjava.api.model.LogConfig.LoggingType.fromValue(config.getLogDriver()),
-                        logOpts.isEmpty() ? null : logOpts
-                ));
-            } catch (Exception e) {
-                log.debug("Skip log config: {}", e.getMessage());
-            }
-        }
-        return h;
     }
 
-    public java.util.Optional<String> resolveNamedVolumeForChildBinds(DockerExecutionProfileEntity profile) {
+    private void applyNetworkMode(HostConfig hostConfig, DockerExecutionProfileEntity config) {
+        String network = resolveNetworkMode(config);
+        if (network != null) {
+            hostConfig.withNetworkMode(network);
+        }
+    }
+
+    private String resolveNetworkMode(DockerExecutionProfileEntity config) {
+        String fromProfile = nonBlankOrNull(config.getNetworkMode());
+        if (fromProfile != null) {
+            return fromProfile;
+        }
+        return nonBlankOrNull(defaultNetworkName);
+    }
+
+    private void applyRestartPolicy(HostConfig hostConfig, DockerExecutionProfileEntity config) {
+        String restartPolicy = nonBlankOrNull(config.getRestartPolicy());
+        if (restartPolicy == null) {
+            return;
+        }
+        try {
+            hostConfig.withRestartPolicy(RestartPolicy.parse(restartPolicy));
+        } catch (RuntimeException e) {
+            log.debug("Restart policy not applied: {}", e.getMessage());
+        }
+    }
+
+    private void applyLogDriver(HostConfig hostConfig, DockerExecutionProfileEntity config) {
+        String logDriver = nonBlankOrNull(config.getLogDriver());
+        if (logDriver == null) {
+            return;
+        }
+        Map<String, String> logOpts = buildLogOptions(config);
+        try {
+            hostConfig.withLogConfig(new LogConfig(
+                    LogConfig.LoggingType.fromValue(logDriver),
+                    logOpts.isEmpty() ? null : logOpts
+            ));
+        } catch (RuntimeException e) {
+            log.debug("Skip log config: {}", e.getMessage());
+        }
+    }
+
+    private static Map<String, String> buildLogOptions(DockerExecutionProfileEntity config) {
+        Map<String, String> logOpts = new HashMap<>();
+        if (config.getLogMaxSize() != null) {
+            logOpts.put("max-size", config.getLogMaxSize());
+        }
+        if (config.getLogMaxFiles() != null) {
+            logOpts.put("max-file", String.valueOf(config.getLogMaxFiles()));
+        }
+        return logOpts;
+    }
+
+    private static String nonBlankOrNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value;
+    }
+
+    public Optional<String> resolveNamedVolumeForChildBinds(DockerExecutionProfileEntity profile) {
         if (profile != null && profile.getNamedVolumeForChildBinds() != null
                 && !profile.getNamedVolumeForChildBinds().isBlank()) {
-            return java.util.Optional.of(profile.getNamedVolumeForChildBinds().trim());
+            return Optional.of(profile.getNamedVolumeForChildBinds().trim());
         }
         return namedVolumeForChildBinds();
     }

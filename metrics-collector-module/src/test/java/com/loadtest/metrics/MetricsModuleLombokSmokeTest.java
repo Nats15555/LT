@@ -25,29 +25,13 @@ class MetricsModuleLombokSmokeTest {
 
         MetricsCollectionRequest.MetricsRequestItem item =
                 new MetricsCollectionRequest.MetricsRequestItem("n", "POST", "http://x", Map.of("h", "v"), "a=1", Map.of("k", "v"));
-        MetricsCollectionRequest req = MetricsCollectionRequest.builder()
-                .taskId("t")
-                .requests(List.of(item))
-                .delaySeconds(1)
-                .testStartTime(10L)
-                .testEndTime(20L)
-                .build();
-        assertThat(req.getRequests()).hasSize(1);
+        MetricsCollectionRequest req = new MetricsCollectionRequest("t", List.of(item), 1, 10L, 20L);
+        assertThat(req.requests()).hasSize(1);
 
-        MetricsCollectionResponse.SummaryResult sr = MetricsCollectionResponse.SummaryResult.builder()
-                .status("SUCCESS")
-                .summary("ok")
-                .details(Map.of("k", "v"))
-                .build();
-        MetricsCollectionResponse resp = MetricsCollectionResponse.builder()
-                .taskId("t")
-                .status("SUCCESS")
-                .message("ok")
-                .metrics(Map.of("m", 1))
-                .summary(sr)
-                .collectionStartTime(1L)
-                .collectionEndTime(2L)
-                .build();
+        MetricsCollectionResponse.SummaryResult sr = new MetricsCollectionResponse.SummaryResult(
+                "SUCCESS", "ok", Map.of("k", "v"));
+        MetricsCollectionResponse resp = new MetricsCollectionResponse(
+                "t", "SUCCESS", "ok", Map.of("m", 1), sr, 1L, 2L);
         assertThat(resp.toString()).contains("SUCCESS");
 
         SummarizationTaskEvent s1 = new SummarizationTaskEvent("t", "sum");
@@ -59,7 +43,6 @@ class MetricsModuleLombokSmokeTest {
         assertThat(props.getHostOverrides()).containsEntry("prometheus", "localhost");
 
         TaskMetricsConfigRepository.TaskMetricsConfig cfg = new TaskMetricsConfigRepository.TaskMetricsConfig("{\"a\":1}");
-        assertThat(cfg.getMetricsConfigJson()).isEqualTo("{\"a\":1}");
+        assertThat(cfg.metricsConfigJson()).isEqualTo("{\"a\":1}");
     }
 }
-

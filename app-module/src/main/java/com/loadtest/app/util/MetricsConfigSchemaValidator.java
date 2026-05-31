@@ -23,7 +23,7 @@ public class MetricsConfigSchemaValidator {
     @PostConstruct
     void loadSchema() throws Exception {
         JsonSchemaFactory factory = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V7);
-        ClassPathResource resource = new ClassPathResource("schemas/metrics-config.schema.json");
+        ClassPathResource resource = new ClassPathResource(ClasspathResources.METRICS_CONFIG_SCHEMA);
         try (InputStream in = resource.getInputStream()) {
             jsonSchema = factory.getSchema(in);
         }

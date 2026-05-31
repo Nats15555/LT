@@ -2,71 +2,48 @@ package com.loadtest.metrics.persistence;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.jdbc.core.ResultSetExtractor;
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.sql.ResultSet;
+import java.time.OffsetDateTime;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+@ExtendWith(MockitoExtension.class)
 class TaskMetricsConfigRepositoryTest {
 
-    private JdbcTemplate jdbc;
+    @Mock
+    private TestTaskJpaRepository testTaskJpaRepository;
+    @Mock
+    private TestTaskHistoryJpaRepository testTaskHistoryJpaRepository;
+
     private TaskMetricsConfigRepository repo;
 
     @BeforeEach
     void setUp() {
-        jdbc = mock(JdbcTemplate.class);
-        repo = new TaskMetricsConfigRepository(jdbc);
+        repo = new TaskMetricsConfigRepository(testTaskJpaRepository, testTaskHistoryJpaRepository);
     }
 
     @Test
     void findByTaskId_andSummarizerBranches() {
         UUID id = UUID.randomUUID();
-
-        when(jdbc.query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class), any()))
-                .thenAnswer(inv -> {
-                    @SuppressWarnings("unchecked")
-                    ResultSetExtractor<Optional<TaskMetricsConfigRepository.TaskMetricsConfig>> ex = inv.getArgument(1);
-                    ResultSet rs = mock(ResultSet.class);
-                    when(rs.next()).thenReturn(true);
-                    when(rs.getString("metrics_config")).thenReturn("{\"a\":1}");
-                    return ex.extractData(rs);
-                });
+        when(testTaskJpaRepository.findById(id)).thenReturn(Optional.of(taskWithConfig()));
         assertThat(repo.findByTaskId(id)).isPresent();
 
-        when(jdbc.query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class), any()))
-                .thenAnswer(inv -> {
-                    @SuppressWarnings("unchecked")
-                    ResultSetExtractor<Optional<TaskMetricsConfigRepository.TaskMetricsConfig>> ex = inv.getArgument(1);
-                    ResultSet rs = mock(ResultSet.class);
-                    when(rs.next()).thenReturn(false);
-                    return ex.extractData(rs);
-                });
+        when(testTaskJpaRepository.findById(id)).thenReturn(Optional.empty());
+        when(testTaskHistoryJpaRepository.findById(id)).thenReturn(Optional.empty());
         assertThat(repo.findByTaskId(id)).isEmpty();
 
-        when(jdbc.query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class), any()))
-                .thenAnswer(inv -> {
-                    @SuppressWarnings("unchecked")
-                    ResultSetExtractor<Optional<String>> ex = inv.getArgument(1);
-                    ResultSet rs = mock(ResultSet.class);
-                    when(rs.next()).thenReturn(true);
-                    when(rs.getString("summarizer_name")).thenReturn("route");
-                    return ex.extractData(rs);
-                });
+        when(testTaskJpaRepository.findById(id)).thenReturn(Optional.of(taskWithSummarizer("route")));
         assertThat(repo.findSummarizerNameByTaskId(id)).contains("route");
 
-        when(jdbc.query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class), any()))
-                .thenThrow(new RuntimeException("db"));
+        when(testTaskJpaRepository.findById(id)).thenThrow(new RuntimeException("db"));
         assertThat(repo.findSummarizerNameByTaskId(id)).isEmpty();
         assertThat(repo.findByTaskId(id)).isEmpty();
     }
@@ -74,88 +51,113 @@ class TaskMetricsConfigRepositoryTest {
     @Test
     void findSummarizerName_fallsBackToHistoryWhenTaskBlank() {
         UUID id = UUID.randomUUID();
-        when(jdbc.query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class), any()))
-                .thenReturn(Optional.of("   "), Optional.of("hist-route"));
+        when(testTaskJpaRepository.findById(id)).thenReturn(Optional.of(taskWithSummarizer("   ")));
+        when(testTaskHistoryJpaRepository.findById(id)).thenReturn(Optional.of(historyWithSummarizer("hist-route")));
         assertThat(repo.findSummarizerNameByTaskId(id)).contains("hist-route");
     }
 
     @Test
     void findByTaskId_fallbackToHistory_withRowsAndWithoutRows() {
         UUID id = UUID.randomUUID();
-        when(jdbc.query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class), any()))
-                .thenAnswer(inv -> {
-                    String sql = inv.getArgument(0);
-                    @SuppressWarnings("unchecked")
-                    ResultSetExtractor<Optional<TaskMetricsConfigRepository.TaskMetricsConfig>> ex = inv.getArgument(1);
-                    ResultSet rs = mock(ResultSet.class);
-                    if (sql.contains("FROM test_task WHERE")) {
-                        when(rs.next()).thenReturn(false);
-                    } else {
-                        when(rs.next()).thenReturn(true);
-                        when(rs.getString("metrics_config")).thenReturn("{\"h\":1}");
-                    }
-                    return ex.extractData(rs);
-                });
+        when(testTaskJpaRepository.findById(id)).thenReturn(Optional.empty());
+        when(testTaskHistoryJpaRepository.findById(id)).thenReturn(Optional.of(historyWithConfig()));
         assertThat(repo.findByTaskId(id)).isPresent();
 
-        when(jdbc.query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class), any()))
-                .thenAnswer(inv -> {
-                    @SuppressWarnings("unchecked")
-                    ResultSetExtractor<Optional<TaskMetricsConfigRepository.TaskMetricsConfig>> ex = inv.getArgument(1);
-                    ResultSet rs = mock(ResultSet.class);
-                    when(rs.next()).thenReturn(false);
-                    return ex.extractData(rs);
-                });
+        when(testTaskJpaRepository.findById(id)).thenReturn(Optional.empty());
+        when(testTaskHistoryJpaRepository.findById(id)).thenReturn(Optional.empty());
         assertThat(repo.findByTaskId(id)).isEmpty();
     }
 
     @Test
-    void findSummarizerName_bothQueriesNoRows_hitsLine48() {
+    void findSummarizerName_bothQueriesNoRows() {
         UUID id = UUID.randomUUID();
-        doAnswer(inv -> {
-            @SuppressWarnings("unchecked")
-            ResultSetExtractor<Optional<String>> ex = inv.getArgument(1);
-            ResultSet rs = mock(ResultSet.class);
-            when(rs.next()).thenReturn(false);
-            return ex.extractData(rs);
-        }).when(jdbc).query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class), any());
-
+        when(testTaskJpaRepository.findById(id)).thenReturn(Optional.empty());
+        when(testTaskHistoryJpaRepository.findById(id)).thenReturn(Optional.empty());
         assertThat(repo.findSummarizerNameByTaskId(id)).isEmpty();
     }
 
     @Test
-    void findSummarizerName_returnsFromTestTask_whenNonBlank_hitsIfTrueBranchLine38() {
+    void findSummarizerName_returnsFromTestTask_whenNonBlank() {
         UUID id = UUID.randomUUID();
-        when(jdbc.query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class), any()))
-                .thenReturn(Optional.of("route-from-task"));
-
+        when(testTaskJpaRepository.findById(id)).thenReturn(Optional.of(taskWithSummarizer("route-from-task")));
         assertThat(repo.findSummarizerNameByTaskId(id)).contains("route-from-task");
-        verify(jdbc, times(1)).query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class), any());
+        verify(testTaskHistoryJpaRepository, times(0)).findById(id);
     }
 
     @Test
-    void findSummarizerName_fallsBackWhenTestTaskEmpty_hitsIfFalseBranchLine38() {
+    void findSummarizerName_fallsBackWhenTestTaskEmpty() {
         UUID id = UUID.randomUUID();
-        when(jdbc.query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class), any()))
-                .thenReturn(Optional.empty(), Optional.of("route-from-history"));
-
+        when(testTaskJpaRepository.findById(id)).thenReturn(Optional.empty());
+        when(testTaskHistoryJpaRepository.findById(id)).thenReturn(Optional.of(historyWithSummarizer("route-from-history")));
         assertThat(repo.findSummarizerNameByTaskId(id)).contains("route-from-history");
-        verify(jdbc, times(2)).query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class), any());
+        verify(testTaskHistoryJpaRepository).findById(id);
     }
 
     @Test
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    void findSummarizerName_fallsBackWhenFirstOptionalContainsNull_hitsMiddleBranchLine38() {
+    void findSummarizerName_fallsBackWhenTaskSummarizerNull() {
         UUID id = UUID.randomUUID();
-        Optional broken = mock(Optional.class);
-        when(broken.isPresent()).thenReturn(true);
-        when(broken.get()).thenReturn(null);
-
-        when(jdbc.query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class), any()))
-                .thenReturn(broken, Optional.of("route-from-history"));
-
+        when(testTaskJpaRepository.findById(id)).thenReturn(Optional.of(taskWithSummarizer(null)));
+        when(testTaskHistoryJpaRepository.findById(id)).thenReturn(Optional.of(historyWithSummarizer("route-from-history")));
         assertThat(repo.findSummarizerNameByTaskId(id)).contains("route-from-history");
-        verify(jdbc, times(2)).query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class), any());
+    }
+
+    private static TestTaskEntity taskWithConfig() {
+        return TestTaskEntity.builder()
+                .id(UUID.randomUUID())
+                .status(TestTaskStatus.PENDING)
+                .createdAt(OffsetDateTime.now())
+                .updatedAt(OffsetDateTime.now())
+                .testTool("k6")
+                .testFileName("f.js")
+                .testFileContentBase64("YQ==")
+                .command("run")
+                .metricsConfig("{\"a\":1}")
+                .dockerExecutionProfileId(UUID.randomUUID())
+                .build();
+    }
+
+    private static TestTaskEntity taskWithSummarizer(String summarizerName) {
+        return TestTaskEntity.builder()
+                .id(UUID.randomUUID())
+                .status(TestTaskStatus.PENDING)
+                .createdAt(OffsetDateTime.now())
+                .updatedAt(OffsetDateTime.now())
+                .testTool("k6")
+                .testFileName("f.js")
+                .testFileContentBase64("YQ==")
+                .command("run")
+                .summarizerName(summarizerName)
+                .dockerExecutionProfileId(UUID.randomUUID())
+                .build();
+    }
+
+    private static TestTaskHistoryEntity historyWithConfig() {
+        OffsetDateTime now = OffsetDateTime.now();
+        return TestTaskHistoryEntity.builder()
+                .id(UUID.randomUUID())
+                .finalStatus("OK")
+                .createdAt(now)
+                .movedAt(now)
+                .testTool("k6")
+                .testFileName("f.js")
+                .testFileContentBase64("YQ==")
+                .command("run")
+                .metricsConfig("{\"h\":1}")
+                .build();
+    }
+
+    private static TestTaskHistoryEntity historyWithSummarizer(String summarizerName) {
+        OffsetDateTime now = OffsetDateTime.now();
+        return TestTaskHistoryEntity.builder()
+                .id(UUID.randomUUID())
+                .finalStatus("OK")
+                .createdAt(now)
+                .movedAt(now)
+                .testTool("k6")
+                .testFileName("f.js")
+                .testFileContentBase64("YQ==")
+                .command("run")
+                .summarizerName(summarizerName)
+                .build();
     }
 }
-

@@ -1,22 +1,12 @@
 package com.loadtest.app.model;
 
 import com.loadtest.app.dto.ArtifactInfoDto;
-import com.loadtest.app.dto.CreateDockerProfileRequest;
-import com.loadtest.app.dto.CreateLoadTestToolRequest;
-import com.loadtest.app.dto.CreateSummarizerRequest;
-import com.loadtest.app.dto.DockerProfileDto;
 import com.loadtest.app.dto.LoadTestToolDto;
-import com.loadtest.app.dto.MetricsItemDto;
 import com.loadtest.app.dto.SummarizationTaskEvent;
 import com.loadtest.app.dto.SummarizerModelDto;
-import com.loadtest.app.dto.SummaryItemDto;
-import com.loadtest.app.dto.TaskHistoryItemDto;
 import com.loadtest.app.dto.TaskQueueItemDto;
 import com.loadtest.app.dto.TestTaskEvent;
 import com.loadtest.app.dto.TestTaskMessage;
-import com.loadtest.app.dto.UpdateDockerProfileRequest;
-import com.loadtest.app.dto.UpdateLoadTestToolRequest;
-import com.loadtest.app.dto.UpdateSummarizerRequest;
 import com.loadtest.app.persistence.DockerExecutionProfileEntity;
 import com.loadtest.app.persistence.LoadTestToolEntity;
 import com.loadtest.app.persistence.SummarizerModelEntity;
@@ -38,30 +28,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static com.loadtest.app.testsupport.ReflectionTestSupport.getField;
+import static com.loadtest.app.testsupport.ReflectionTestSupport.newInstance;
+import static com.loadtest.app.testsupport.ReflectionTestSupport.setField;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class LombokEqualsBranchExhaustiveTest {
 
-    private static final Class<?>[] TARGET_CLASSES = new Class<?>[] {
-            ArtifactInfoDto.class,
-            CreateDockerProfileRequest.class,
-            CreateLoadTestToolRequest.class,
-            CreateSummarizerRequest.class,
-            DockerProfileDto.class,
-            LoadTestToolDto.class,
-            MetricsItemDto.class,
-            SummarizationTaskEvent.class,
-            SummarizerModelDto.class,
-            SummaryItemDto.class,
-            TaskHistoryItemDto.class,
-            TaskQueueItemDto.class,
-            TestTaskEvent.class,
-            TestTaskMessage.class,
-            TestTaskMessage.MetricsConfig.class,
-            TestTaskMessage.MetricsConfig.MetricsRequest.class,
-            UpdateDockerProfileRequest.class,
-            UpdateLoadTestToolRequest.class,
-            UpdateSummarizerRequest.class,
+    private static final Class<?>[] ENTITY_CLASSES = new Class<?>[] {
             DockerExecutionProfileEntity.class,
             LoadTestToolEntity.class,
             SummarizerModelEntity.class,
@@ -73,19 +47,54 @@ class LombokEqualsBranchExhaustiveTest {
     };
 
     @Test
-    void equalsHashCode_branchesCoveredForAllFields() throws Exception {
-        for (Class<?> type : TARGET_CLASSES) {
+    void kafkaEventRecords_equalsBranches() {
+        TestTaskEvent taskEvent = new TestTaskEvent("t1");
+        assertThat(taskEvent).isEqualTo(new TestTaskEvent("t1"));
+        assertThat(taskEvent).isNotEqualTo(new TestTaskEvent("t2"));
+
+        SummarizationTaskEvent sumEvent = new SummarizationTaskEvent("t1", "sum");
+        assertThat(sumEvent).isEqualTo(new SummarizationTaskEvent("t1", "sum"));
+        assertThat(sumEvent).isNotEqualTo(new SummarizationTaskEvent("t2", "sum"));
+    }
+
+    @Test
+    void recordDto_equalsSmokeTests() {
+        UUID id = UUID.randomUUID();
+        OffsetDateTime ts = OffsetDateTime.parse("2024-01-01T00:00:00Z");
+
+        ArtifactInfoDto artifact = new ArtifactInfoDto(id, "f.txt", 42L);
+        assertThat(artifact).isEqualTo(new ArtifactInfoDto(id, "f.txt", 42L));
+        assertThat(artifact).isNotEqualTo(new ArtifactInfoDto(id, "other.txt", 42L));
+
+        LoadTestToolDto tool = new LoadTestToolDto(id, "K6", "k6", List.of(".js"), true, ts, ts);
+        assertThat(tool).isEqualTo(new LoadTestToolDto(id, "K6", "k6", List.of(".js"), true, ts, ts));
+        assertThat(tool).isNotEqualTo(new LoadTestToolDto(id, "JMETER", "k6", List.of(".js"), true, ts, ts));
+
+        SummarizerModelDto summarizer = new SummarizerModelDto(id, "s", "OPENAI", null, "m", null, true, ts, ts);
+        assertThat(summarizer).isEqualTo(new SummarizerModelDto(id, "s", "OPENAI", null, "m", null, true, ts, ts));
+
+        TaskQueueItemDto queueItem = new TaskQueueItemDto(id, "PENDING", "K6", "f.js", null, id, "prof", ts);
+        assertThat(queueItem).isEqualTo(new TaskQueueItemDto(id, "PENDING", "K6", "f.js", null, id, "prof", ts));
+
+        TestTaskMessage.MetricsConfig cfg = new TestTaskMessage.MetricsConfig(
+                1, List.of(new TestTaskMessage.MetricsConfig.MetricsRequest("n", "GET", "http://u", null, null, null)));
+        TestTaskMessage message = new TestTaskMessage("t1", "K6", "f.js", "YQ==", null, null, cfg);
+        assertThat(message).isEqualTo(new TestTaskMessage("t1", "K6", "f.js", "YQ==", null, null, cfg));
+        assertThat(message).isNotEqualTo(new TestTaskMessage("t2", "K6", "f.js", "YQ==", null, null, cfg));
+    }
+
+    @Test
+    void equalsHashCode_branchesCoveredForEntityFields() {
+        for (Class<?> type : ENTITY_CLASSES) {
             assertEqualsBranchesPerField(type);
         }
         assertThat(TestTaskStatus.values()).contains(TestTaskStatus.PENDING, TestTaskStatus.PROCESSING);
         assertThat(TestTaskStatus.valueOf("PENDING")).isEqualTo(TestTaskStatus.PENDING);
     }
 
-    private static void assertEqualsBranchesPerField(Class<?> type) throws Exception {
-        instantiateViaBuilderAndAllArgs(type);
-
+    private static void assertEqualsBranchesPerField(Class<?> type) {
         Object base = newInstance(type);
-        setAllFields(base, 1);
+        setAllFields(base);
         Object same = cloneWithAllFields(type, base);
 
         assertThat(base).isEqualTo(same);
@@ -97,61 +106,28 @@ class LombokEqualsBranchExhaustiveTest {
         List<Field> fields = instanceFields(type);
         for (Field f : fields) {
             Object diff = cloneWithAllFields(type, base);
-            f.set(diff, valueForField(f.getType(), f.getName(), 2));
+            setField(f, diff, valueForField(f.getType(), f.getName(), 2));
             assertThat(base).as(type.getSimpleName() + "." + f.getName()).isNotEqualTo(diff);
 
             if (!f.getType().isPrimitive()) {
                 Object leftNull = cloneWithAllFields(type, base);
                 Object rightNull = cloneWithAllFields(type, base);
-                f.set(leftNull, null);
-                f.set(rightNull, null);
+                setField(f, leftNull, null);
+                setField(f, rightNull, null);
                 assertThat(leftNull).as(type.getSimpleName() + "." + f.getName() + " both null").isEqualTo(rightNull);
 
                 Object rightNonNull = cloneWithAllFields(type, base);
-                f.set(rightNonNull, valueForField(f.getType(), f.getName(), 3));
+                setField(f, rightNonNull, valueForField(f.getType(), f.getName(), 3));
                 assertThat(leftNull).as(type.getSimpleName() + "." + f.getName() + " null vs non-null").isNotEqualTo(rightNonNull);
 
                 Object leftNonNull = cloneWithAllFields(type, base);
                 Object rightNullFromNonNull = cloneWithAllFields(type, base);
-                f.set(rightNullFromNonNull, null);
+                setField(f, rightNullFromNonNull, null);
                 assertThat(leftNonNull)
                         .as(type.getSimpleName() + "." + f.getName() + " non-null vs null")
                         .isNotEqualTo(rightNullFromNonNull);
             }
         }
-    }
-
-    private static void instantiateViaBuilderAndAllArgs(Class<?> type) {
-        try {
-            Object b = type.getMethod("builder").invoke(null);
-            for (Field f : instanceFields(type)) {
-                try {
-                    var m = b.getClass().getMethod(f.getName(), f.getType());
-                    m.invoke(b, valueForField(f.getType(), f.getName(), 1));
-                } catch (NoSuchMethodException ignored) {
-                }
-            }
-            Object built = b.getClass().getMethod("build").invoke(b);
-            assertThat(built).isNotNull();
-        } catch (Exception ignored) {
-        }
-
-        try {
-            List<Field> fs = instanceFields(type);
-            Class<?>[] sig = fs.stream().map(Field::getType).toArray(Class[]::new);
-            Object[] args = fs.stream().map(f -> valueForField(f.getType(), f.getName(), 1)).toArray();
-            var ctor = type.getDeclaredConstructor(sig);
-            ctor.setAccessible(true);
-            Object x = ctor.newInstance(args);
-            assertThat(x).isNotNull();
-        } catch (Exception ignored) {
-        }
-    }
-
-    private static Object newInstance(Class<?> type) throws Exception {
-        var ctor = type.getDeclaredConstructor();
-        ctor.setAccessible(true);
-        return ctor.newInstance();
     }
 
     private static List<Field> instanceFields(Class<?> type) {
@@ -166,21 +142,20 @@ class LombokEqualsBranchExhaustiveTest {
         return out;
     }
 
-    private static void setAllFields(Object target, int seed) throws Exception {
+    private static void setAllFields(Object target) {
         for (Field f : instanceFields(target.getClass())) {
-            f.set(target, valueForField(f.getType(), f.getName(), seed));
+            setField(f, target, valueForField(f.getType(), f.getName(), 1));
         }
     }
 
-    private static Object cloneWithAllFields(Class<?> type, Object source) throws Exception {
+    private static Object cloneWithAllFields(Class<?> type, Object source) {
         Object copy = newInstance(type);
         for (Field f : instanceFields(type)) {
-            f.set(copy, f.get(source));
+            setField(f, copy, getField(f, source));
         }
         return copy;
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
     private static Object valueForField(Class<?> t, String name, int seed) {
         if (t == String.class) return name + "-" + seed;
         if (t == Integer.class) return 100 + seed;
@@ -206,7 +181,7 @@ class LombokEqualsBranchExhaustiveTest {
                 f.set(obj, valueForField(f.getType(), f.getName(), seed));
             }
             return obj;
-        } catch (Exception ignored) {
+        } catch (ReflectiveOperationException ignored) {
             return seed == 1 ? new LinkedHashMap<>() : new ArrayList<>();
         }
     }

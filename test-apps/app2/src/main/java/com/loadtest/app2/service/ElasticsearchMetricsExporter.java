@@ -10,7 +10,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,6 +21,8 @@ import java.util.Map;
 @Slf4j
 @Service
 public class ElasticsearchMetricsExporter {
+
+    private static final String METRIC_FIELD_VALUE = "value";
     
     private final MeterRegistry meterRegistry;
     private final WebClient webClient;
@@ -54,7 +59,7 @@ public class ElasticsearchMetricsExporter {
             sendToElasticsearch(metrics);
             log.debug("Exported {} metrics to Elasticsearch", metrics.size());
             
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.error("Error exporting metrics to Elasticsearch", e);
         }
     }
@@ -77,24 +82,24 @@ public class ElasticsearchMetricsExporter {
                 switch (meter.getId().getType()) {
                     case COUNTER:
                         io.micrometer.core.instrument.Counter counter = (io.micrometer.core.instrument.Counter) meter;
-                        metricDoc.put("value", counter.count());
+                        metricDoc.put(METRIC_FIELD_VALUE, counter.count());
                         break;
                     case TIMER:
                         io.micrometer.core.instrument.Timer timer = (io.micrometer.core.instrument.Timer) meter;
-                        metricDoc.put("value", timer.totalTime(java.util.concurrent.TimeUnit.MILLISECONDS));
+                        metricDoc.put(METRIC_FIELD_VALUE, timer.totalTime(TimeUnit.MILLISECONDS));
                         metricDoc.put("count", timer.count());
-                        metricDoc.put("mean", timer.mean(java.util.concurrent.TimeUnit.MILLISECONDS));
+                        metricDoc.put("mean", timer.mean(TimeUnit.MILLISECONDS));
                         break;
                     case GAUGE:
                         io.micrometer.core.instrument.Gauge gauge = (io.micrometer.core.instrument.Gauge) meter;
-                        metricDoc.put("value", gauge.value());
+                        metricDoc.put(METRIC_FIELD_VALUE, gauge.value());
                         break;
                     default:
                         continue;
                 }
                 
                 metrics.add(metricDoc);
-            } catch (Exception e) {
+            } catch (RuntimeException e) {
                 log.warn("Error collecting metric: {}", meter.getId().getName(), e);
             }
         }
@@ -104,13 +109,11 @@ public class ElasticsearchMetricsExporter {
     
     private void sendToElasticsearch(List<Map<String, Object>> metrics) {
         try {
-            String index = indexName + "-" + java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy.MM.dd"));
+            String index = indexName + "-" + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy.MM.dd"));
 
             StringBuilder bulkBody = new StringBuilder();
             for (Map<String, Object> metric : metrics) {
-                Map<String, Object> indexAction = new HashMap<>();
-                indexAction.put("index", Map.of("_index", index));
-                bulkBody.append(objectMapper.writeValueAsString(indexAction)).append("\n");
+                bulkBody.append(objectMapper.writeValueAsString(Map.of("index", Map.of("_index", index)))).append("\n");
                 bulkBody.append(objectMapper.writeValueAsString(metric)).append("\n");
             }
             
@@ -124,7 +127,7 @@ public class ElasticsearchMetricsExporter {
             
             log.debug("Elasticsearch bulk response: {}", response);
             
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.error("Error sending metrics to Elasticsearch", e);
             throw new RuntimeException("Failed to send metrics to Elasticsearch", e);
         }

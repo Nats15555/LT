@@ -2,30 +2,32 @@ package com.loadtest.metrics.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.loadtest.metrics.persistence.TestSummaryEntity;
+import com.loadtest.metrics.persistence.TestSummaryJpaRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class ExternalSummarizationPendingServiceTest {
 
-    private JdbcTemplate jdbcTemplate;
+    private TestSummaryJpaRepository testSummaryJpaRepository;
     private ExternalSummarizationPendingService service;
 
     @BeforeEach
     void setUp() {
-        jdbcTemplate = mock(JdbcTemplate.class);
-        service = new ExternalSummarizationPendingService(jdbcTemplate, new ObjectMapper());
+        testSummaryJpaRepository = mock(TestSummaryJpaRepository.class);
+        service = new ExternalSummarizationPendingService(testSummaryJpaRepository, new ObjectMapper());
         ReflectionTestUtils.setField(service, "windowMinutes", 2);
     }
 
@@ -33,14 +35,22 @@ class ExternalSummarizationPendingServiceTest {
     void registerAndFailPendingWindow_branches() {
         UUID taskId = UUID.randomUUID();
         service.registerPendingWindow(taskId, "ext");
-        verify(jdbcTemplate).update(contains("DELETE FROM test_summary"), eq(taskId),
-                eq(ExternalSummarizationPendingService.PROCESSING_STATUS_AWAITING));
-        verify(jdbcTemplate).update(contains("INSERT INTO test_summary"), any(), eq(taskId), eq("AI_SUMMARY"),
-                any(), eq(ExternalSummarizationPendingService.PROCESSING_STATUS_AWAITING), eq(null), any());
+        verify(testSummaryJpaRepository).deleteByTaskIdAndProcessingStatus(taskId,
+                ExternalSummarizationPendingService.PROCESSING_STATUS_AWAITING);
+        verify(testSummaryJpaRepository).save(any(TestSummaryEntity.class));
+
+        when(testSummaryJpaRepository.findByTaskIdAndProcessingStatus(taskId,
+                ExternalSummarizationPendingService.PROCESSING_STATUS_AWAITING))
+                .thenReturn(List.of(TestSummaryEntity.builder()
+                        .id(UUID.randomUUID())
+                        .taskId(taskId)
+                        .summaryType("AI_SUMMARY")
+                        .summaryData("{}")
+                        .processingStatus(ExternalSummarizationPendingService.PROCESSING_STATUS_AWAITING)
+                        .build()));
 
         service.failPendingWindow(taskId, "x");
-        verify(jdbcTemplate).update(contains("UPDATE test_summary SET processing_status = 'FAILED'"), eq("x"), any(),
-                eq(taskId), eq(ExternalSummarizationPendingService.PROCESSING_STATUS_AWAITING));
+        verify(testSummaryJpaRepository).saveAll(any());
         service.failPendingWindow(taskId, " ");
     }
 
@@ -48,25 +58,21 @@ class ExternalSummarizationPendingServiceTest {
     void registerPendingWindow_jsonFailure_fallback() throws Exception {
         ObjectMapper bad = mock(ObjectMapper.class);
         doThrow(new JsonProcessingException("err") {}).when(bad).writeValueAsString(any());
-        ExternalSummarizationPendingService s2 = new ExternalSummarizationPendingService(jdbcTemplate, bad);
+        ExternalSummarizationPendingService s2 = new ExternalSummarizationPendingService(testSummaryJpaRepository, bad);
         ReflectionTestUtils.setField(s2, "windowMinutes", 2);
         s2.registerPendingWindow(UUID.randomUUID(), "ext");
-        verify(jdbcTemplate).update(contains("INSERT INTO test_summary"), any(), any(), eq("AI_SUMMARY"),
-                eq("{}"), eq(ExternalSummarizationPendingService.PROCESSING_STATUS_AWAITING), eq(null), any());
+        verify(testSummaryJpaRepository).save(any(TestSummaryEntity.class));
     }
 
     @Test
-    void failPendingWindow_usesDefaultMessageWhenNull_hitsLine74NullBranch() {
+    void failPendingWindow_usesDefaultMessageWhenNull() {
         UUID taskId = UUID.randomUUID();
+        when(testSummaryJpaRepository.findByTaskIdAndProcessingStatus(taskId,
+                ExternalSummarizationPendingService.PROCESSING_STATUS_AWAITING))
+                .thenReturn(List.of());
 
         service.failPendingWindow(taskId, null);
 
-        verify(jdbcTemplate, times(1)).update(
-                contains("UPDATE test_summary SET processing_status = 'FAILED'"),
-                eq("FAILED"),
-                any(),
-                eq(taskId),
-                eq(ExternalSummarizationPendingService.PROCESSING_STATUS_AWAITING));
+        verify(testSummaryJpaRepository, times(1)).saveAll(eq(List.of()));
     }
 }
-

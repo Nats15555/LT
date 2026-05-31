@@ -7,6 +7,7 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.test.context.TestPropertySource;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -66,7 +67,7 @@ class ExecutionJpaSliceTest {
                 .id(id)
                 .name("tool-jpa-" + id.toString().substring(0, 8))
                 .dockerImage("alpine:latest")
-                .fileExtensions(java.util.List.of("js"))
+                .fileExtensions(List.of("js"))
                 .enabled(true)
                 .createdAt(now)
                 .updatedAt(now)

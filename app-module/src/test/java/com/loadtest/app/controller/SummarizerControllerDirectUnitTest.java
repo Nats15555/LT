@@ -6,7 +6,6 @@ import com.loadtest.app.dto.UpdateSummarizerRequest;
 import com.loadtest.app.service.SummarizerService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.http.ResponseEntity;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -31,20 +30,13 @@ class SummarizerControllerDirectUnitTest {
     }
 
     private SummarizerModelDto dto() {
-        return SummarizerModelDto.builder()
-                .id(UUID.randomUUID())
-                .name("s1")
-                .provider("OPENAI")
-                .modelId("m")
-                .enabled(true)
-                .createdAt(OffsetDateTime.MIN)
-                .updatedAt(OffsetDateTime.MIN)
-                .build();
+        return new SummarizerModelDto(
+                UUID.randomUUID(), "s1", "OPENAI", null, "m", null, true, OffsetDateTime.MIN, OffsetDateTime.MIN);
     }
 
     @Test
     void coverAllBranchesDirectly() {
-        CreateSummarizerRequest create = CreateSummarizerRequest.builder().name("s1").modelId("m").enabled(true).build();
+        CreateSummarizerRequest create = new CreateSummarizerRequest("s1", null, null, "m", null, true);
         doReturn(dto()).when(service).create(any());
         assertThat(controller.create(create).getStatusCode().value()).isEqualTo(201);
         reset(service);
@@ -79,7 +71,7 @@ class SummarizerControllerDirectUnitTest {
         doThrow(new RuntimeException("boom")).when(service).getByName("s1");
         assertThat(controller.getByName("s1").getStatusCode().value()).isEqualTo(500);
 
-        UpdateSummarizerRequest upd = new UpdateSummarizerRequest();
+        UpdateSummarizerRequest upd = new UpdateSummarizerRequest(null, null, null, null, null);
         reset(service);
         doReturn(dto()).when(service).update(any(), any());
         assertThat(controller.update(id, upd).getStatusCode().value()).isEqualTo(200);

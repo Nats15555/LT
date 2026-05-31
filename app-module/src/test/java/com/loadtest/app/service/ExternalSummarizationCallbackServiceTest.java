@@ -18,7 +18,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -29,12 +28,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
+import static com.loadtest.app.testsupport.JsonTestSupport.stubWriteValueAsStringFailure;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.contains;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -53,43 +50,41 @@ class ExternalSummarizationCallbackServiceTest {
     private TestMetricsRepository metricsRepository;
     @Mock
     private TestSummaryRepository summaryRepository;
-    @Mock
-    private JdbcTemplate jdbcTemplate;
 
-    private ObjectMapper objectMapper;
     private ExternalSummarizationCallbackService service;
 
     @BeforeEach
     void setUp() {
-        objectMapper = new ObjectMapper();
+        ObjectMapper objectMapper = new ObjectMapper();
+        CustomSummarizationPromptStore customSummarizationPromptStore = new CustomSummarizationPromptStore();
         service = new ExternalSummarizationCallbackService(
                 historyRepository,
                 summarizerModelRepository,
                 artifactRepository,
                 metricsRepository,
                 summaryRepository,
-                jdbcTemplate,
-                objectMapper);
+                objectMapper,
+                customSummarizationPromptStore);
         ReflectionTestUtils.setField(service, "windowMinutes", 5);
     }
 
     @Test
-    void registerPendingWindow_writesJdbc() {
+    void registerPendingWindow_writesSummary() {
         UUID taskId = UUID.randomUUID();
         service.registerPendingWindow(taskId, "ext");
-        verify(jdbcTemplate, atLeastOnce()).update(contains("DELETE FROM test_summary"), eq(taskId), eq(ExternalSummarizationCallbackService.PROCESSING_STATUS_AWAITING));
-        verify(jdbcTemplate, atLeastOnce()).update(contains("INSERT INTO test_summary"), any(), any(), any(), any(), any(), any(), any());
+        verify(summaryRepository).deleteByTaskIdAndProcessingStatus(taskId, ExternalSummarizationCallbackService.PROCESSING_STATUS_AWAITING);
+        verify(summaryRepository).save(any(TestSummaryEntity.class));
     }
 
     @Test
-    void registerPendingWindow_jsonFailureFallsBackToEmptyObject() throws Exception {
+    void registerPendingWindow_jsonFailureFallsBackToEmptyObject() {
         ObjectMapper badOm = mock(ObjectMapper.class);
-        when(badOm.writeValueAsString(any())).thenThrow(new JsonProcessingException("x") {});
+        stubWriteValueAsStringFailure(badOm, new JsonProcessingException("x") {});
         ExternalSummarizationCallbackService s2 = new ExternalSummarizationCallbackService(
-                historyRepository, summarizerModelRepository, artifactRepository, metricsRepository, summaryRepository, jdbcTemplate, badOm);
+                historyRepository, summarizerModelRepository, artifactRepository, metricsRepository, summaryRepository, badOm, new CustomSummarizationPromptStore());
         ReflectionTestUtils.setField(s2, "windowMinutes", 1);
         s2.registerPendingWindow(UUID.randomUUID(), "ext");
-        verify(jdbcTemplate).update(contains("INSERT INTO test_summary"), any(), any(), any(), eq("{}"), any(), any(), any());
+        verify(summaryRepository).save(any(TestSummaryEntity.class));
     }
 
     @Test
@@ -376,11 +371,11 @@ class ExternalSummarizationCallbackServiceTest {
     }
 
     @Test
-    void submitExternalSummary_jsonSerializationFailure_returns500() throws Exception {
+    void submitExternalSummary_jsonSerializationFailure_returns500() {
         ObjectMapper badOm = mock(ObjectMapper.class);
-        when(badOm.writeValueAsString(any())).thenThrow(new JsonProcessingException("ser") {});
+        stubWriteValueAsStringFailure(badOm, new JsonProcessingException("ser") {});
         ExternalSummarizationCallbackService s2 = new ExternalSummarizationCallbackService(
-                historyRepository, summarizerModelRepository, artifactRepository, metricsRepository, summaryRepository, jdbcTemplate, badOm);
+                historyRepository, summarizerModelRepository, artifactRepository, metricsRepository, summaryRepository, badOm, new CustomSummarizationPromptStore());
 
         UUID taskId = UUID.randomUUID();
         OffsetDateTime t = OffsetDateTime.now(ZoneOffset.UTC);

@@ -7,7 +7,6 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
 
@@ -42,10 +41,9 @@ public class TestController {
                 Thread.currentThread().interrupt();
             }
             
-            Map<String, Object> response = new HashMap<>();
-            response.put("message", "Hello from Test App 2");
-            response.put("timestamp", System.currentTimeMillis());
-            return response;
+            return Map.of(
+                    "message", "Hello from Test App 2",
+                    "timestamp", System.currentTimeMillis());
         });
     }
     
@@ -61,11 +59,10 @@ public class TestController {
             }
             long duration = System.currentTimeMillis() - start;
             
-            Map<String, Object> response = new HashMap<>();
-            response.put("message", "Memory intensive task completed");
-            response.put("arraySize", array.length);
-            response.put("duration", duration);
-            return response;
+            return Map.of(
+                    "message", "Memory intensive task completed",
+                    "arraySize", array.length,
+                    "duration", duration);
         });
     }
 }

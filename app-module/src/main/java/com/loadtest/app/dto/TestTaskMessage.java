@@ -1,47 +1,37 @@
 package com.loadtest.app.dto;
 
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-
 import java.io.Serializable;
+import java.util.List;
+import java.util.Map;
 
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
-public class TestTaskMessage implements Serializable {
-    private String taskId;
-    private String testTool;
-    private String testFileName;
-    private String testFileContent;
+public record TestTaskMessage(
+        String taskId,
+        String testTool,
+        String testFileName,
+        String testFileContent,
+        String status,
+        Long timestamp,
+        MetricsConfig metricsConfig) implements Serializable {
 
-    private String status; // PENDING, PROCESSING, COMPLETED, FAILED
-    private Long timestamp;
+    public record MetricsConfig(Integer delaySeconds, List<MetricsRequest> requests) implements Serializable {
+        public MetricsConfig {
+            if (delaySeconds == null) {
+                delaySeconds = 0;
+            }
+        }
 
-    private MetricsConfig metricsConfig;
-    
-
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class MetricsConfig implements Serializable {
-        private Integer delaySeconds = 0;
-        private java.util.List<MetricsRequest> requests;
-
-        @Data
-        @NoArgsConstructor
-        @AllArgsConstructor
-        public static class MetricsRequest implements Serializable {
-            private String name;
-            private String method = "GET";
-            private String url;
-            private java.util.Map<String, String> headers;
-            private Object queryParams;
-            private Object body;
+        public record MetricsRequest(
+                String name,
+                String method,
+                String url,
+                Map<String, String> headers,
+                Object queryParams,
+                Object body) implements Serializable {
+            public MetricsRequest {
+                if (method == null || method.isBlank()) {
+                    method = "GET";
+                }
+            }
         }
     }
 }
-
-

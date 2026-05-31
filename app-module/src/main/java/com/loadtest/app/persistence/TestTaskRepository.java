@@ -7,14 +7,12 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
-import java.util.List;
 import java.util.UUID;
 
 public interface TestTaskRepository extends JpaRepository<TestTaskEntity, UUID> {
 
-    long countByDockerExecutionProfileId(java.util.UUID dockerExecutionProfileId);
+    long countByDockerExecutionProfileId(UUID dockerExecutionProfileId);
 
-    List<TestTaskEntity> findAllByOrderByCreatedAtDesc();
     Page<TestTaskEntity> findAllByOrderByCreatedAtDesc(Pageable pageable);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)

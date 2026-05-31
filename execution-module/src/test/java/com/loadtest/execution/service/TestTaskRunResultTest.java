@@ -33,9 +33,10 @@ class TestTaskRunResultTest {
 
     @Test
     void completed_exposesMessageOutcomeAndMetricsFlag() {
-        TestTaskMessage msg = TestTaskMessage.builder().taskId(UUID.randomUUID().toString()).build();
+        TestTaskMessage msg = new TestTaskMessage(
+                UUID.randomUUID().toString(), null, null, null, null, null, null, null, null, null);
         TaskProcessOutcome out = new TaskProcessOutcome(
-                ExecutionResponse.builder().status("ok").executionTime(1L).build(),
+                new ExecutionResponse("ok", null, null, null, null, 1L, null, null),
                 10L,
                 20L);
         TestTaskRunResult r = TestTaskRunResult.completed(msg, out, true);

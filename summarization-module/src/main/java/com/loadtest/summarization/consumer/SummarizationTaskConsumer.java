@@ -5,8 +5,9 @@ import com.loadtest.summarization.persistence.SummarizerConfig;
 import com.loadtest.summarization.persistence.SummarizerModelRepository;
 import com.loadtest.summarization.persistence.TaskHistoryRepository;
 import com.loadtest.summarization.persistence.TestSummaryWriter;
-import com.loadtest.summarization.service.PromptBuilder;
 import com.loadtest.summarization.service.OpenAiCompatibleClient;
+import com.loadtest.summarization.service.PromptBuilder;
+import com.loadtest.summarization.util.TestSummaryConstants;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -33,13 +34,14 @@ public class SummarizationTaskConsumer {
             containerFactory = "kafkaListenerContainerFactory"
     )
     public void consume(SummarizationTaskEvent event, Acknowledgment acknowledgment) {
-        String taskIdStr = event.getTaskId();
+        String taskIdStr = event.taskId();
         log.info("Received summarization event: taskId={}", taskIdStr);
 
         UUID taskId;
+        String promptUsed = null;
         try {
             taskId = UUID.fromString(taskIdStr);
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.warn("Invalid taskId: {}", taskIdStr);
             acknowledgment.acknowledge();
             return;
@@ -47,8 +49,8 @@ public class SummarizationTaskConsumer {
 
         try {
             final String summarizerName;
-            if (event.getSummarizerName() != null && !event.getSummarizerName().isBlank()) {
-                summarizerName = event.getSummarizerName().trim();
+            if (event.summarizerName() != null && !event.summarizerName().isBlank()) {
+                summarizerName = event.summarizerName().trim();
             } else {
                 summarizerName = taskHistoryRepository.getSummarizerNameByTaskId(taskId).orElse(null);
             }
@@ -67,7 +69,14 @@ public class SummarizationTaskConsumer {
                 return;
             }
 
-            String prompt = promptBuilder.buildPrompt(taskId);
+            String prompt;
+            if (event.customPrompt() != null && !event.customPrompt().isBlank()) {
+                prompt = event.customPrompt().trim();
+                log.info("Using user-provided custom prompt for taskId={} (length={})", taskId, prompt.length());
+            } else {
+                prompt = promptBuilder.buildPrompt(taskId);
+            }
+            promptUsed = prompt;
             long startMs = System.currentTimeMillis();
             log.info("Calling LLM (LiteLLM/OpenAI-compatible) for taskId={}, summarizer={}, baseUrl={}, modelId={} (prompt length={})",
                     taskId, summarizerName, config.getBaseUrl(), config.getModelId(), prompt.length());
@@ -75,28 +84,35 @@ public class SummarizationTaskConsumer {
             long elapsedSec = (System.currentTimeMillis() - startMs) / 1000;
             log.info("LLM responded in {}s for taskId={}", elapsedSec, taskId);
 
-            Map<String, Object> summaryData = Map.of(
-                    "text", summaryText,
-                    "model", config.getModelId(),
-                    "summarizerName", config.getName()
-            );
-            testSummaryWriter.saveSummary(taskId, "AI_SUMMARY", summaryData, "COMPLETED", null);
+        Map<String, Object> summaryData = Map.of(
+                "text", summaryText,
+                "model", config.getModelId(),
+                "summarizerName", config.getName(),
+                "promptUsed", prompt);
+        testSummaryWriter.saveSummary(taskId, TestSummaryConstants.TYPE_AI_SUMMARY, summaryData,
+                    TestSummaryConstants.STATUS_COMPLETED, null);
             log.info("Summarization completed for taskId={}, summarizer={}", taskId, summarizerName);
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             if (e instanceof IllegalArgumentException) {
                 log.warn("Суммаризация не выполнена для taskId={}: {}", taskId, e.getMessage());
             } else {
                 log.error("Summarization failed for taskId={}", taskId, e);
             }
-            try {
-                testSummaryWriter.saveSummary(taskId, "AI_SUMMARY",
-                        Map.of("error", e.getMessage()),
-                        "FAILED",
-                        e.getMessage());
-            } catch (Exception ex) {
-                log.warn("Failed to save FAILED summary: {}", ex.getMessage());
-            }
+            saveFailedSummary(taskId, promptUsed, e);
         }
         acknowledgment.acknowledge();
+    }
+
+    private void saveFailedSummary(UUID taskId, String promptUsed, RuntimeException e) {
+        try {
+            String error = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            Map<String, Object> failedSummaryData = promptUsed != null && !promptUsed.isBlank()
+                    ? Map.of("error", error, "promptUsed", promptUsed)
+                    : Map.of("error", error);
+            testSummaryWriter.saveSummary(taskId, TestSummaryConstants.TYPE_AI_SUMMARY, failedSummaryData,
+                    TestSummaryConstants.STATUS_FAILED, e.getMessage());
+        } catch (RuntimeException ex) {
+            log.warn("Failed to save FAILED summary: {}", ex.getMessage());
+        }
     }
 }

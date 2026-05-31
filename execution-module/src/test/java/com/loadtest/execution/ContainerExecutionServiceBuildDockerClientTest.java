@@ -36,7 +36,7 @@ class ContainerExecutionServiceBuildDockerClientTest {
     private static boolean windowsDockerPipeExists(String pipePath) {
         try {
             return Files.exists(Paths.get(pipePath));
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             return false;
         }
     }
@@ -116,7 +116,7 @@ class ContainerExecutionServiceBuildDockerClientTest {
 
     @Test
     void createDockerClient_failureWhenOsHintOverrideNonWindows_skipsDesktopHintInCatch() {
-        ContainerExecutionService.setDockerBuildFailureOsNameOverrideForTests("Linux");
+        ContainerExecutionService.setDockerBuildFailureOsNameOverrideForTests();
         BuildHarness h = new BuildHarness();
         assertThatThrownBy(() -> h.createDockerClientWrapped("tcp://bad host:2375"))
                 .isInstanceOf(RuntimeException.class)

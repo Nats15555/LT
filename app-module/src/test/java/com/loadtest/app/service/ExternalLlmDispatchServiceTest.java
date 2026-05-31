@@ -20,14 +20,13 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -43,12 +42,13 @@ class ExternalLlmDispatchServiceTest {
     private TestTaskHistoryRepository historyRepository;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final CustomSummarizationPromptStore customSummarizationPromptStore = new CustomSummarizationPromptStore();
     private ExternalLlmDispatchService service;
     private HttpServer server;
 
     @BeforeEach
     void setUp() {
-        service = new ExternalLlmDispatchService(callbackService, summarizerModelRepository, historyRepository, objectMapper);
+        service = new ExternalLlmDispatchService(callbackService, summarizerModelRepository, historyRepository, objectMapper, customSummarizationPromptStore);
         ReflectionTestUtils.setField(service, "fallbackReceiverUrl", "");
         ReflectionTestUtils.setField(service, "rewriteDockerServiceHostTo", "");
     }
@@ -60,8 +60,12 @@ class ExternalLlmDispatchServiceTest {
         }
     }
 
-    private void startServer(int status, String body) throws Exception {
-        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    private void startServer(int status, String body) {
+        try {
+            server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        } catch (java.io.IOException ex) {
+            throw new AssertionError("Failed to start test HTTP server", ex);
+        }
         server.createContext("/ack", exchange -> {
             exchange.getRequestBody().readAllBytes();
             byte[] b = body.getBytes(StandardCharsets.UTF_8);
@@ -75,12 +79,12 @@ class ExternalLlmDispatchServiceTest {
     }
 
     @Test
-    void dispatch_success() throws Exception {
+    void dispatch_success() {
         startServer(200, "{\"received\":true}");
         int port = server.getAddress().getPort();
         UUID taskId = UUID.randomUUID();
-        OffsetDateTime t = OffsetDateTime.now(java.time.ZoneOffset.UTC);
-        when(callbackService.buildPackage(taskId)).thenReturn(Map.of("taskId", taskId.toString()));
+        OffsetDateTime t = OffsetDateTime.now(ZoneOffset.UTC);
+        when(callbackService.buildPackage(eq(taskId), org.mockito.ArgumentMatchers.any())).thenReturn(Map.of("taskId", taskId.toString()));
         when(historyRepository.findById(taskId)).thenReturn(Optional.of(
                 TestTaskHistoryEntity.builder()
                         .id(taskId).finalStatus("OK").createdAt(t).movedAt(t).testTool("k6").testFileName("f.js")
@@ -97,8 +101,8 @@ class ExternalLlmDispatchServiceTest {
     @Test
     void dispatch_connectFailure_invokesFailPending() {
         UUID taskId = UUID.randomUUID();
-        OffsetDateTime t = OffsetDateTime.now(java.time.ZoneOffset.UTC);
-        when(callbackService.buildPackage(taskId)).thenReturn(Map.of("k", "v"));
+        OffsetDateTime t = OffsetDateTime.now(ZoneOffset.UTC);
+        when(callbackService.buildPackage(eq(taskId), org.mockito.ArgumentMatchers.any())).thenReturn(Map.of("k", "v"));
         when(historyRepository.findById(taskId)).thenReturn(Optional.of(
                 TestTaskHistoryEntity.builder()
                         .id(taskId).finalStatus("OK").createdAt(t).movedAt(t).testTool("k6").testFileName("f.js")
@@ -114,12 +118,12 @@ class ExternalLlmDispatchServiceTest {
     }
 
     @Test
-    void dispatch_receivedFalse_invokesFailPending() throws Exception {
+    void dispatch_receivedFalse_invokesFailPending() {
         startServer(200, "{\"received\":false,\"reason\":\"nope\"}");
         int port = server.getAddress().getPort();
         UUID taskId = UUID.randomUUID();
-        OffsetDateTime t = OffsetDateTime.now(java.time.ZoneOffset.UTC);
-        when(callbackService.buildPackage(taskId)).thenReturn(Map.of("k", "v"));
+        OffsetDateTime t = OffsetDateTime.now(ZoneOffset.UTC);
+        when(callbackService.buildPackage(eq(taskId), org.mockito.ArgumentMatchers.any())).thenReturn(Map.of("k", "v"));
         when(historyRepository.findById(taskId)).thenReturn(Optional.of(
                 TestTaskHistoryEntity.builder()
                         .id(taskId).finalStatus("OK").createdAt(t).movedAt(t).testTool("k6").testFileName("f.js")
@@ -135,12 +139,12 @@ class ExternalLlmDispatchServiceTest {
     }
 
     @Test
-    void dispatch_receivedFalse_withoutReason_usesBaseMessage() throws Exception {
+    void dispatch_receivedFalse_withoutReason_usesBaseMessage() {
         startServer(200, "{\"received\":false}");
         int port = server.getAddress().getPort();
         UUID taskId = UUID.randomUUID();
-        OffsetDateTime t = OffsetDateTime.now(java.time.ZoneOffset.UTC);
-        when(callbackService.buildPackage(taskId)).thenReturn(Map.of("k", "v"));
+        OffsetDateTime t = OffsetDateTime.now(ZoneOffset.UTC);
+        when(callbackService.buildPackage(eq(taskId), org.mockito.ArgumentMatchers.any())).thenReturn(Map.of("k", "v"));
         when(historyRepository.findById(taskId)).thenReturn(Optional.of(
                 TestTaskHistoryEntity.builder()
                         .id(taskId).finalStatus("OK").createdAt(t).movedAt(t).testTool("k6").testFileName("f.js")
@@ -157,10 +161,10 @@ class ExternalLlmDispatchServiceTest {
     }
 
     @Test
-    void dispatch_validationAndRewrite() throws Exception {
+    void dispatch_validationAndRewrite() {
         UUID taskId = UUID.randomUUID();
-        OffsetDateTime t = OffsetDateTime.now(java.time.ZoneOffset.UTC);
-        when(callbackService.buildPackage(taskId)).thenReturn(Map.of());
+        OffsetDateTime t = OffsetDateTime.now(ZoneOffset.UTC);
+        when(callbackService.buildPackage(eq(taskId), org.mockito.ArgumentMatchers.any())).thenReturn(Map.of());
         when(historyRepository.findById(taskId)).thenReturn(Optional.empty());
         assertThatThrownBy(() -> service.dispatchPackage(taskId))
                 .isInstanceOf(ResponseStatusException.class)
@@ -207,10 +211,10 @@ class ExternalLlmDispatchServiceTest {
     }
 
     @Test
-    void dispatch_httpError_andBlankBody_andFallbackUrl() throws Exception {
+    void dispatch_httpError_andBlankBody_andFallbackUrl() {
         UUID taskId = UUID.randomUUID();
-        OffsetDateTime t = OffsetDateTime.now(java.time.ZoneOffset.UTC);
-        when(callbackService.buildPackage(taskId)).thenReturn(Map.of("taskId", taskId.toString()));
+        OffsetDateTime t = OffsetDateTime.now(ZoneOffset.UTC);
+        when(callbackService.buildPackage(eq(taskId), org.mockito.ArgumentMatchers.any())).thenReturn(Map.of("taskId", taskId.toString()));
         when(historyRepository.findById(taskId)).thenReturn(Optional.of(
                 TestTaskHistoryEntity.builder()
                         .id(taskId).finalStatus("OK").createdAt(t).movedAt(t).testTool("k6").testFileName("f.js")

@@ -2,6 +2,7 @@ package com.loadtest.execution.service;
 
 import com.loadtest.execution.dto.TaskProcessOutcome;
 import com.loadtest.execution.dto.TestTaskMessage;
+import lombok.Getter;
 
 import java.util.UUID;
 
@@ -13,9 +14,13 @@ public final class TestTaskRunResult {
         FAILED
     }
 
+    @Getter
     private final Kind kind;
+    @Getter
     private final UUID taskId;
+    @Getter
     private final TestTaskMessage message;
+    @Getter
     private final TaskProcessOutcome outcome;
     private final boolean hasNonEmptyMetricsRequests;
 
@@ -34,28 +39,12 @@ public final class TestTaskRunResult {
 
     public static TestTaskRunResult completed(TestTaskMessage message, TaskProcessOutcome outcome,
                                               boolean hasNonEmptyMetricsRequests) {
-        return new TestTaskRunResult(Kind.COMPLETED, UUID.fromString(message.getTaskId()), message, outcome,
+        return new TestTaskRunResult(Kind.COMPLETED, UUID.fromString(message.taskId()), message, outcome,
                 hasNonEmptyMetricsRequests);
     }
 
     public static TestTaskRunResult failed(UUID taskId) {
         return new TestTaskRunResult(Kind.FAILED, taskId, null, null, false);
-    }
-
-    public Kind getKind() {
-        return kind;
-    }
-
-    public UUID getTaskId() {
-        return taskId;
-    }
-
-    public TestTaskMessage getMessage() {
-        return message;
-    }
-
-    public TaskProcessOutcome getOutcome() {
-        return outcome;
     }
 
     public boolean hasNonEmptyMetricsRequests() {

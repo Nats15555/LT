@@ -80,7 +80,7 @@ class ArtifactCollectorServiceTest {
         Path hostFile = reports.resolve(reportBase + ".txt");
         Files.writeString(hostFile, "data");
         when(commandFromDbService.deriveArtifactFilePathsFromCommand(any(), any()))
-                .thenReturn(java.util.List.of(hostFile.toString()));
+                .thenReturn(List.of(hostFile.toString()));
 
         collector.collectAndSaveArtifacts(
                 taskId,
@@ -237,9 +237,9 @@ class ArtifactCollectorServiceTest {
     @Test
     void addFilesByPrefix_earlyExit_viaReflection() throws Exception {
         Method m = ArtifactCollectorService.class.getDeclaredMethod(
-                "addFilesByPrefix", java.util.Set.class, String.class, String.class);
+                "addFilesByPrefix", Set.class, String.class, String.class);
         m.setAccessible(true);
-        java.util.Set<String> set = new java.util.LinkedHashSet<>();
+        Set<String> set = new LinkedHashSet<>();
         m.invoke(null, set, null, "p");
         m.invoke(null, set, "", "p");
         m.invoke(null, set, "   ", "p");

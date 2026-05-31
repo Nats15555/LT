@@ -52,12 +52,7 @@ class LoadTestToolServiceTest {
     @Test
     void createTool_duplicateName() {
         when(toolRepository.existsByName("k6")).thenReturn(true);
-        CreateLoadTestToolRequest req = CreateLoadTestToolRequest.builder()
-                .name("k6")
-                .dockerImage("img")
-                .fileExtensions(List.of(".js"))
-                .enabled(true)
-                .build();
+        CreateLoadTestToolRequest req = new CreateLoadTestToolRequest("k6", "img", List.of(".js"), true);
         assertThatThrownBy(() -> service.createTool(req)).isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -81,13 +76,8 @@ class LoadTestToolServiceTest {
                 .build();
         when(toolRepository.findById(org.mockito.ArgumentMatchers.any(UUID.class))).thenReturn(Optional.of(saved));
 
-        CreateLoadTestToolRequest req = CreateLoadTestToolRequest.builder()
-                .name("locust")
-                .dockerImage("locust:latest")
-                .fileExtensions(List.of(".py"))
-                .enabled(true)
-                .build();
-        assertThat(service.createTool(req).getName()).isEqualTo("LOCUST");
+        CreateLoadTestToolRequest req = new CreateLoadTestToolRequest("locust", "locust:latest", List.of(".py"), true);
+        assertThat(service.createTool(req).name()).isEqualTo("LOCUST");
         verify(q).executeUpdate();
     }
 
@@ -110,12 +100,7 @@ class LoadTestToolServiceTest {
                         .updatedAt(OffsetDateTime.MIN)
                         .build()));
 
-        service.createTool(CreateLoadTestToolRequest.builder()
-                .name("t")
-                .dockerImage("i")
-                .fileExtensions(List.of("a\"b", "c\\d"))
-                .enabled(false)
-                .build());
+        service.createTool(new CreateLoadTestToolRequest("t", "i", List.of("a\"b", "c\\d"), false));
         verify(q).setParameter(eq("fileExtensionsStr"), eq("{\"a\\\"b\",\"c\\\\d\"}"));
     }
 
@@ -138,12 +123,7 @@ class LoadTestToolServiceTest {
                         .updatedAt(OffsetDateTime.MIN)
                         .build()));
 
-        service.createTool(CreateLoadTestToolRequest.builder()
-                .name("k6")
-                .dockerImage("i")
-                .fileExtensions(List.of())
-                .enabled(true)
-                .build());
+        service.createTool(new CreateLoadTestToolRequest("k6", "i", List.of(), true));
         verify(q).setParameter(eq("fileExtensionsStr"), eq("{}"));
     }
 
@@ -166,8 +146,8 @@ class LoadTestToolServiceTest {
 
         assertThat(service.getAllTools()).hasSize(1);
         assertThat(service.getEnabledTools()).hasSize(1);
-        assertThat(service.getToolById(id).getDockerImage()).isEqualTo("k6");
-        assertThat(service.getToolByName("k6").getId()).isEqualTo(id);
+        assertThat(service.getToolById(id).dockerImage()).isEqualTo("k6");
+        assertThat(service.getToolByName("k6").id()).isEqualTo(id);
     }
 
     @Test
@@ -185,7 +165,7 @@ class LoadTestToolServiceTest {
     @Test
     void updateTool_notFound() {
         when(toolRepository.existsById(any(UUID.class))).thenReturn(false);
-        assertThatThrownBy(() -> service.updateTool(UUID.randomUUID(), new UpdateLoadTestToolRequest()))
+        assertThatThrownBy(() -> service.updateTool(UUID.randomUUID(), new UpdateLoadTestToolRequest(null, null, null)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -204,7 +184,7 @@ class LoadTestToolServiceTest {
                 .build();
         when(toolRepository.findById(id)).thenReturn(Optional.of(e));
 
-        assertThat(service.updateTool(id, new UpdateLoadTestToolRequest()).getId()).isEqualTo(id);
+        assertThat(service.updateTool(id, new UpdateLoadTestToolRequest(null, null, null)).id()).isEqualTo(id);
         verify(entityManager, never()).createNativeQuery(org.mockito.ArgumentMatchers.contains("UPDATE load_test_tools"));
     }
 
@@ -227,9 +207,8 @@ class LoadTestToolServiceTest {
                 .build();
         when(toolRepository.findById(id)).thenReturn(Optional.of(updated));
 
-        UpdateLoadTestToolRequest req = new UpdateLoadTestToolRequest();
-        req.setDockerImage("newimg");
-        assertThat(service.updateTool(id, req).getDockerImage()).isEqualTo("newimg");
+        UpdateLoadTestToolRequest req = new UpdateLoadTestToolRequest("newimg", null, null);
+        assertThat(service.updateTool(id, req).dockerImage()).isEqualTo("newimg");
         verify(q).executeUpdate();
     }
 
@@ -252,9 +231,7 @@ class LoadTestToolServiceTest {
                         .updatedAt(OffsetDateTime.MIN)
                         .build()));
 
-        UpdateLoadTestToolRequest req = new UpdateLoadTestToolRequest();
-        req.setEnabled(false);
-        req.setFileExtensions(List.of("a\"b", "c\\d"));
+        UpdateLoadTestToolRequest req = new UpdateLoadTestToolRequest(null, List.of("a\"b", "c\\d"), false);
         service.updateTool(id, req);
         verify(q).setParameter(eq("fileExtensions"), eq("{\"a\\\"b\",\"c\\\\d\"}"));
         verify(q).setParameter(eq("enabled"), eq(false));

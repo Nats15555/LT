@@ -21,11 +21,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SummarizationLombokBranchExhaustiveTest {
 
     private static final Class<?>[] TARGET_CLASSES = new Class<?>[] {
-            SummarizationTaskEvent.class,
             SummarizerConfig.class,
             TaskArtifactsRepository.ArtifactContent.class,
             TaskMetricsRepository.MetricsRow.class
     };
+
+    @Test
+    void summarizationTaskEvent_recordEquals() {
+        SummarizationTaskEvent base = new SummarizationTaskEvent("t", "s");
+        assertThat(base).isEqualTo(new SummarizationTaskEvent("t", "s"));
+        assertThat(base).isNotEqualTo(new SummarizationTaskEvent("x", "s"));
+    }
 
     @Test
     void equalsHashCode_andBuilders_covered() throws Exception {
@@ -36,7 +42,6 @@ class SummarizationLombokBranchExhaustiveTest {
 
     @Test
     void dataClasses_canEqual_trueAndFalseBranches() throws Exception {
-        assertCanEqualBranches(SummarizationTaskEvent.class);
         assertCanEqualBranches(SummarizerConfig.class);
         assertCanEqualBranches(TaskArtifactsRepository.ArtifactContent.class);
         assertCanEqualBranches(TaskMetricsRepository.MetricsRow.class);
@@ -44,20 +49,17 @@ class SummarizationLombokBranchExhaustiveTest {
 
     @Test
     void dataClasses_equals_nullFieldBranches() throws Exception {
-        assertNullFieldBranches(SummarizationTaskEvent.class);
-        assertNullFieldBranches(SummarizerConfig.class);
+        assertNullFieldBranches();
     }
 
     @Test
     void dataClasses_equalsSelf_andHashCodeNullBranches() throws Exception {
-        assertEqualsSelfAndHashCodeNullBranches(SummarizationTaskEvent.class);
-        assertEqualsSelfAndHashCodeNullBranches(SummarizerConfig.class);
+        assertEqualsSelfAndHashCodeNullBranches();
     }
 
     @Test
     void dataClasses_equals_whenBothSidesHaveNullFields() throws Exception {
-        assertEqualsWithBothNullFieldValues(SummarizationTaskEvent.class);
-        assertEqualsWithBothNullFieldValues(SummarizerConfig.class);
+        assertEqualsWithBothNullFieldValues();
     }
 
     @Test
@@ -84,9 +86,6 @@ class SummarizationLombokBranchExhaustiveTest {
 
     @Test
     void dataClasses_equals_branchWhenOtherCanEqualReturnsFalse() {
-        assertThat(new SummarizationTaskEvent("t", "s"))
-                .isNotEqualTo(new SummarizationTaskEventCanEqualFalse());
-
         UUID id = UUID.randomUUID();
         SummarizerConfig cfg = SummarizerConfig.builder()
                 .id(id)
@@ -179,46 +178,46 @@ class SummarizationLombokBranchExhaustiveTest {
         assertThat((Boolean) ReflectionTestUtils.invokeMethod(left, "canEqual", "x")).isFalse();
     }
 
-    private static void assertNullFieldBranches(Class<?> type) throws Exception {
-        Object base = newInstance(type);
-        setAllFields(base, 1);
-        for (Field f : instanceFields(type)) {
+    private static void assertNullFieldBranches() throws Exception {
+        Object base = newInstance(SummarizerConfig.class);
+        setAllFields(base);
+        for (Field f : instanceFields(SummarizerConfig.class)) {
             if (f.getType().isPrimitive()) {
                 continue;
             }
-            Object leftNull = cloneWithAllFields(type, base);
-            Object rightValue = cloneWithAllFields(type, base);
+            Object leftNull = cloneWithAllFields(SummarizerConfig.class, base);
+            Object rightValue = cloneWithAllFields(SummarizerConfig.class, base);
             f.set(leftNull, null);
             assertThat(leftNull).isNotEqualTo(rightValue);
 
-            Object leftValue = cloneWithAllFields(type, base);
-            Object rightNull = cloneWithAllFields(type, base);
+            Object leftValue = cloneWithAllFields(SummarizerConfig.class, base);
+            Object rightNull = cloneWithAllFields(SummarizerConfig.class, base);
             f.set(rightNull, null);
             assertThat(leftValue).isNotEqualTo(rightNull);
         }
     }
 
-    private static void assertEqualsSelfAndHashCodeNullBranches(Class<?> type) throws Exception {
-        Object base = newInstance(type);
-        setAllFields(base, 1);
+    private static void assertEqualsSelfAndHashCodeNullBranches() throws Exception {
+        Object base = newInstance(SummarizerConfig.class);
+        setAllFields(base);
         assertThat(base).isEqualTo(base);
         base.hashCode();
-        for (Field f : instanceFields(type)) {
+        for (Field f : instanceFields(SummarizerConfig.class)) {
             if (f.getType().isPrimitive()) {
                 continue;
             }
-            Object withNull = cloneWithAllFields(type, base);
+            Object withNull = cloneWithAllFields(SummarizerConfig.class, base);
             f.set(withNull, null);
             withNull.hashCode();
         }
     }
 
-    private static void assertEqualsWithBothNullFieldValues(Class<?> type) throws Exception {
-        Object left = newInstance(type);
-        Object right = newInstance(type);
-        setAllFields(left, 1);
-        setAllFields(right, 1);
-        for (Field f : instanceFields(type)) {
+    private static void assertEqualsWithBothNullFieldValues() throws Exception {
+        Object left = newInstance(SummarizerConfig.class);
+        Object right = newInstance(SummarizerConfig.class);
+        setAllFields(left);
+        setAllFields(right);
+        for (Field f : instanceFields(SummarizerConfig.class)) {
             if (!f.getType().isPrimitive()) {
                 f.set(left, null);
                 f.set(right, null);
@@ -231,7 +230,7 @@ class SummarizationLombokBranchExhaustiveTest {
     private static void assertEqualsBranches(Class<?> type) throws Exception {
         instantiateViaBuilderAndAllArgs(type);
         Object base = newInstance(type);
-        setAllFields(base, 1);
+        setAllFields(base);
         Object same = cloneWithAllFields(type, base);
         assertThat(base).isEqualTo(same);
         assertThat(base.hashCode()).isEqualTo(same.hashCode());
@@ -254,7 +253,7 @@ class SummarizationLombokBranchExhaustiveTest {
                 }
             }
             assertThat(b.getClass().getMethod("build").invoke(b)).isNotNull();
-        } catch (Exception ignored) {
+        } catch (ReflectiveOperationException ignored) {
         }
         try {
             List<Field> fs = instanceFields(type);
@@ -263,7 +262,7 @@ class SummarizationLombokBranchExhaustiveTest {
             var ctor = type.getDeclaredConstructor(sig);
             ctor.setAccessible(true);
             assertThat(ctor.newInstance(args)).isNotNull();
-        } catch (Exception ignored) {
+        } catch (ReflectiveOperationException ignored) {
         }
     }
 
@@ -293,9 +292,9 @@ class SummarizationLombokBranchExhaustiveTest {
         return out;
     }
 
-    private static void setAllFields(Object target, int seed) throws Exception {
+    private static void setAllFields(Object target) throws Exception {
         for (Field f : instanceFields(target.getClass())) {
-            f.set(target, valueForField(f.getType(), f.getName(), seed));
+            f.set(target, valueForField(f.getType(), f.getName(), 1));
         }
     }
 
@@ -320,7 +319,7 @@ class SummarizationLombokBranchExhaustiveTest {
             var ctor = t.getDeclaredConstructor();
             ctor.setAccessible(true);
             return ctor.newInstance();
-        } catch (Exception ignored) {
+        } catch (ReflectiveOperationException ignored) {
             return seed == 1 ? new LinkedHashMap<>() : new ArrayList<>();
         }
     }
@@ -328,13 +327,6 @@ class SummarizationLombokBranchExhaustiveTest {
     private static final class SummarizerConfigChild extends SummarizerConfig { }
 
     private static final class SummarizerConfigCanEqualFalse extends SummarizerConfig {
-        @Override
-        protected boolean canEqual(Object other) {
-            return false;
-        }
-    }
-
-    private static final class SummarizationTaskEventCanEqualFalse extends SummarizationTaskEvent {
         @Override
         protected boolean canEqual(Object other) {
             return false;

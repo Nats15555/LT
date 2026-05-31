@@ -1,25 +1,11 @@
 package com.loadtest.app.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 
 import java.util.List;
 
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
-public class UpdateLoadTestToolRequest {
-    
-    @JsonProperty("dockerImage")
-    private String dockerImage;
-
-    @JsonProperty("fileExtensions")
-    private List<String> fileExtensions;
-
-    @JsonProperty("enabled")
-    private Boolean enabled;
+public record UpdateLoadTestToolRequest(
+        @JsonProperty("dockerImage") String dockerImage,
+        @JsonProperty("fileExtensions") List<String> fileExtensions,
+        @JsonProperty("enabled") Boolean enabled) {
 }

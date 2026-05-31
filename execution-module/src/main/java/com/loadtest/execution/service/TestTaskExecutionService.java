@@ -1,5 +1,6 @@
 package com.loadtest.execution.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.loadtest.execution.dto.TaskProcessOutcome;
@@ -11,6 +12,7 @@ import com.loadtest.execution.persistence.TestTaskEntity;
 import com.loadtest.execution.persistence.TestTaskHistoryEntity;
 import com.loadtest.execution.persistence.TestTaskHistoryRepository;
 import com.loadtest.execution.persistence.TestTaskRepository;
+import com.loadtest.execution.persistence.TestTaskStatus;
 import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +30,10 @@ import java.util.UUID;
 public class TestTaskExecutionService {
 
     private static final int DOCKER_SLOT_WAIT_MS = 2000;
+    private static final String STATUS_PROCESSING = TestTaskStatus.PROCESSING.name();
+    private static final String STATUS_COMPLETED = TestTaskStatus.COMPLETED.name();
+    private static final String STATUS_FAILED = TestTaskStatus.FAILED.name();
+    private static final String STATUS_PENDING = TestTaskStatus.PENDING.name();
 
     private final TestTaskRepository taskRepository;
     private final TestTaskHistoryRepository historyRepository;
@@ -38,7 +44,7 @@ public class TestTaskExecutionService {
 
     @Transactional
     public TestTaskRunResult execute(TestTaskEvent event) {
-        UUID taskId = UUID.fromString(event.getTaskId());
+        UUID taskId = UUID.fromString(event.taskId());
 
         OffsetDateTime now = OffsetDateTime.now();
         boolean claimed;
@@ -72,7 +78,7 @@ public class TestTaskExecutionService {
 
         OffsetDateTime startedAt = OffsetDateTime.now();
         OffsetDateTime finishedAt;
-        String finalStatus = "FAILED";
+        String finalStatus = STATUS_FAILED;
         String errorMessage = null;
         TestTaskMessage message = null;
         TaskProcessOutcome processOutcome = null;
@@ -82,9 +88,9 @@ public class TestTaskExecutionService {
         try {
             message = toMessage(task);
             processOutcome = processor.process(message);
-            finalStatus = "COMPLETED";
-        } catch (Exception e) {
-            finalStatus = "FAILED";
+            finalStatus = STATUS_COMPLETED;
+        } catch (RuntimeException e) {
+            finalStatus = STATUS_FAILED;
             errorMessage = e.getMessage();
             log.error("Task {} failed", taskId, e);
         } finally {
@@ -92,7 +98,7 @@ public class TestTaskExecutionService {
             persistTaskOutcomeAndHistory(taskId, finalStatus, errorMessage, finishedAt);
         }
 
-        if ("COMPLETED".equals(finalStatus) && processOutcome != null) {
+        if (STATUS_COMPLETED.equals(finalStatus) && processOutcome != null) {
             return TestTaskRunResult.completed(message, processOutcome, hasNonEmptyMetricsRequests);
         }
         return TestTaskRunResult.failed(taskId);
@@ -103,13 +109,13 @@ public class TestTaskExecutionService {
         try {
             TestTaskEntity taskForUpdate = taskRepository.findById(taskId).orElse(null);
             if (taskForUpdate != null) {
-                taskForUpdate.setStatus(com.loadtest.execution.persistence.TestTaskStatus.valueOf(finalStatus));
+                taskForUpdate.setStatus(TestTaskStatus.valueOf(finalStatus));
                 taskForUpdate.setErrorMessage(errorMessage);
                 taskForUpdate.setUpdatedAt(OffsetDateTime.now());
                 taskRepository.save(taskForUpdate);
             }
             updateHistoryAndRemoveTask(taskId, finalStatus, errorMessage, finishedAt);
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.error("Failed to update task status/history for task {}", taskId, e);
         }
     }
@@ -122,7 +128,7 @@ public class TestTaskExecutionService {
             Map<String, Object> root = objectMapper.readValue(metricsConfigJson, new TypeReference<>() {});
             Object requests = root.get("requests");
             return requests instanceof List && !((List<?>) requests).isEmpty();
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             log.warn("metrics_config is not valid JSON for metrics gate, task will not publish metrics-collection event: {}",
                     e.getMessage());
             return false;
@@ -130,31 +136,32 @@ public class TestTaskExecutionService {
     }
 
     private TestTaskMessage toMessage(TestTaskEntity task) {
-        TestTaskMessage message = new TestTaskMessage();
-        message.setTaskId(task.getId().toString());
-        message.setTestTool(task.getTestTool());
-        message.setTestFileName(task.getTestFileName());
-        message.setTestFileContent(task.getTestFileContentBase64());
-        message.setCommand(task.getCommand());
-        message.setExpectedDurationSeconds(task.getExpectedDurationSeconds());
-        message.setStatus(task.getStatus().name());
-
-        if (task.getDockerExecutionProfileId() != null) {
-            message.setDockerExecutionProfileId(task.getDockerExecutionProfileId().toString());
-        }
-
+        TestTaskMessage.MetricsConfig metricsConfig = null;
         if (task.getMetricsConfig() != null && !task.getMetricsConfig().trim().isEmpty()) {
             try {
-                TestTaskMessage.MetricsConfig metricsConfig = objectMapper.readValue(
+                metricsConfig = objectMapper.readValue(
                         task.getMetricsConfig(),
                         TestTaskMessage.MetricsConfig.class);
-                message.setMetricsConfig(metricsConfig);
-            } catch (Exception e) {
+            } catch (JsonProcessingException e) {
                 log.warn("Failed to parse metricsConfig for task {}", task.getId(), e);
             }
         }
 
-        return message;
+        String profileId = task.getDockerExecutionProfileId() != null
+                ? task.getDockerExecutionProfileId().toString()
+                : null;
+
+        return new TestTaskMessage(
+                task.getId().toString(),
+                task.getTestTool(),
+                task.getTestFileName(),
+                task.getTestFileContentBase64(),
+                task.getCommand(),
+                task.getExpectedDurationSeconds(),
+                task.getStatus().name(),
+                null,
+                metricsConfig,
+                profileId);
     }
 
     private void ensureHistoryRecordForArtifacts(TestTaskEntity task, OffsetDateTime startedAt) {
@@ -175,7 +182,7 @@ public class TestTaskExecutionService {
                     .orElse(null);
             TestTaskHistoryEntity history = TestTaskHistoryEntity.builder()
                     .id(task.getId())
-                    .finalStatus("PROCESSING")
+                    .finalStatus(STATUS_PROCESSING)
                     .createdAt(task.getCreatedAt())
                     .testTool(task.getTestTool())
                     .testFileName(task.getTestFileName())
@@ -194,9 +201,9 @@ public class TestTaskExecutionService {
             historyRepository.save(history);
             entityManager.flush();
             log.info("Created history record for task {} (PROCESSING) for artifacts FK", task.getId());
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.error("Failed to create history record for task {}", task.getId(), e);
-            throw new RuntimeException("Cannot create history record for artifacts", e);
+            throw new TestTaskHistoryException("Cannot create history record for artifacts", e);
         }
     }
 
@@ -219,7 +226,7 @@ public class TestTaskExecutionService {
                 taskRepository.delete(taskRow);
             }
             log.info("Task {} moved to history with status {}", taskId, finalStatus);
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.error("Failed to move task {} to history", taskId, e);
         }
     }
@@ -228,19 +235,21 @@ public class TestTaskExecutionService {
         while (true) {
             int updated = entityManager.createNativeQuery("""
                             UPDATE test_task t
-                            SET status = 'PROCESSING', updated_at = :now,
+                            SET status = :processing, updated_at = :now,
                                 locked_at = :now, locked_by = 'execution-service'
                             FROM docker_execution_profile p
-                            WHERE t.id = :id AND t.status = 'PENDING'
+                            WHERE t.id = :id AND t.status = :pending
                               AND t.docker_execution_profile_id = p.id
                               AND (
                                 SELECT COUNT(*) FROM test_task x
                                 WHERE x.docker_execution_profile_id = t.docker_execution_profile_id
-                                  AND x.status = 'PROCESSING'
+                                  AND x.status = :processing
                               ) < p.max_concurrent_containers
                             """)
                     .setParameter("id", taskId)
                     .setParameter("now", now)
+                    .setParameter("processing", STATUS_PROCESSING)
+                    .setParameter("pending", STATUS_PENDING)
                     .executeUpdate();
             if (updated > 0) {
                 return true;
@@ -249,7 +258,7 @@ public class TestTaskExecutionService {
             if (row == null) {
                 return false;
             }
-            if (row.getStatus() != com.loadtest.execution.persistence.TestTaskStatus.PENDING) {
+            if (row.getStatus() != TestTaskStatus.PENDING) {
                 return false;
             }
             log.info("Docker profile concurrency full for task {}, retry in {} ms", taskId, DOCKER_SLOT_WAIT_MS);

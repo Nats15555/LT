@@ -5,6 +5,7 @@ import com.loadtest.app.persistence.SummarizerModelEntity;
 import com.loadtest.app.persistence.SummarizerModelRepository;
 import com.loadtest.app.persistence.TestTaskHistoryEntity;
 import com.loadtest.app.persistence.TestTaskHistoryRepository;
+import com.loadtest.app.service.CustomSummarizationPromptStore;
 import com.loadtest.app.service.ExternalLlmDispatchService;
 import com.loadtest.app.service.ExternalSummarizationCallbackService;
 import com.loadtest.app.service.KafkaOutboxService;
@@ -57,6 +58,7 @@ class TasksControllerDirectUnitTest {
                 summarizerModelRepository,
                 externalSummarizationCallbackService,
                 externalLlmDispatchService,
+                new CustomSummarizationPromptStore(),
                 mock(KafkaOutboxService.class),
                 testQueueService,
                 queuePauseService,
@@ -151,7 +153,7 @@ class TasksControllerDirectUnitTest {
                         .updatedAt(OffsetDateTime.MIN)
                         .build()));
         doThrow(new ResponseStatusException(org.springframework.http.HttpStatus.BAD_GATEWAY, " "))
-                .when(externalLlmDispatchService).dispatchPackage(id);
+                .when(externalLlmDispatchService).dispatchPackage(eq(id), isNull());
         ResponseEntity<Map<String, String>> summarizeDispatchBlankReason = controller.requestSummarization(id, null);
         assertThat(summarizeDispatchBlankReason.getStatusCode().value()).isEqualTo(502);
     }

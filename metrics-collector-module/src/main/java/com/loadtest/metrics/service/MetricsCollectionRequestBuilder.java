@@ -1,5 +1,6 @@
 package com.loadtest.metrics.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.loadtest.metrics.dto.MetricsCollectionEvent;
@@ -23,42 +24,42 @@ public class MetricsCollectionRequestBuilder {
     private final TaskMetricsConfigRepository taskMetricsConfigRepository;
     private final ObjectMapper objectMapper;
 
-    public MetricsCollectionRequest buildFromEvent(MetricsCollectionEvent event) {
-        return tryBuildFromEvent(event).orElseThrow(() ->
-                new IllegalArgumentException("Invalid or incomplete metrics configuration for taskId: " + event.getTaskId()));
+    public void buildFromEvent(MetricsCollectionEvent event) {
+        tryBuildFromEvent(event).orElseThrow(() ->
+                new IllegalArgumentException("Invalid or incomplete metrics configuration for taskId: " + event.taskId()));
     }
 
     public Optional<MetricsCollectionRequest> tryBuildFromEvent(MetricsCollectionEvent event) {
-        UUID taskId = UUID.fromString(event.getTaskId());
+        UUID taskId = UUID.fromString(event.taskId());
         Optional<TaskMetricsConfigRepository.TaskMetricsConfig> configOpt = taskMetricsConfigRepository.findByTaskId(taskId);
         if (configOpt.isEmpty()) {
-            log.warn("Metrics config not found for taskId: {}", event.getTaskId());
+            log.warn("Metrics config not found for taskId: {}", event.taskId());
             return Optional.empty();
         }
         TaskMetricsConfigRepository.TaskMetricsConfig config = configOpt.get();
 
-        String metricsConfigJson = config.getMetricsConfigJson();
+        String metricsConfigJson = config.metricsConfigJson();
         if (metricsConfigJson == null || metricsConfigJson.isBlank()) {
-            log.warn("Empty metrics_config for taskId: {}", event.getTaskId());
+            log.warn("Empty metrics_config for taskId: {}", event.taskId());
             return Optional.empty();
         }
 
-        long startMs = event.getTestStartTime() != null ? event.getTestStartTime() : 0L;
-        long endMs = event.getTestEndTime() != null ? event.getTestEndTime() : 0L;
+        long startMs = event.testStartTime() != null ? event.testStartTime() : 0L;
+        long endMs = event.testEndTime() != null ? event.testEndTime() : 0L;
         String replacedJson = MetricsConfigPlaceholderReplacer.replace(metricsConfigJson, startMs, endMs);
 
         Map<String, Object> root;
         try {
             root = objectMapper.readValue(replacedJson, new TypeReference<>() {});
-        } catch (Exception e) {
-            log.warn("Failed to parse metrics_config for taskId={}: {}", event.getTaskId(), e.getMessage());
+        } catch (JsonProcessingException e) {
+            log.warn("Failed to parse metrics_config for taskId={}: {}", event.taskId(), e.getMessage());
             return Optional.empty();
         }
 
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> requestsList = (List<Map<String, Object>>) root.get("requests");
         if (requestsList == null || requestsList.isEmpty()) {
-            log.warn("metrics_config.requests is empty for taskId: {}", event.getTaskId());
+            log.warn("metrics_config.requests is empty for taskId: {}", event.taskId());
             return Optional.empty();
         }
 
@@ -72,12 +73,11 @@ public class MetricsCollectionRequestBuilder {
             items.add(item);
         }
 
-        return Optional.of(MetricsCollectionRequest.builder()
-                .taskId(event.getTaskId())
-                .delaySeconds(delaySeconds)
-                .testStartTime(event.getTestStartTime())
-                .testEndTime(event.getTestEndTime())
-                .requests(items)
-                .build());
+        return Optional.of(new MetricsCollectionRequest(
+                event.taskId(),
+                items,
+                delaySeconds,
+                event.testStartTime(),
+                event.testEndTime()));
     }
 }

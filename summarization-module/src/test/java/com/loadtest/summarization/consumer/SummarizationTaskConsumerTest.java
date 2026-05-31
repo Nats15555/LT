@@ -23,6 +23,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doAnswer;
 
@@ -107,10 +108,30 @@ class SummarizationTaskConsumerTest {
         verify(testSummaryWriter).saveSummary(
                 eq(id),
                 eq("AI_SUMMARY"),
-                eq(Map.of("text", "summary-text", "model", "gpt", "summarizerName", "openai-route")),
+                eq(Map.of("text", "summary-text", "model", "gpt", "summarizerName", "openai-route", "promptUsed", "prompt")),
                 eq("COMPLETED"),
                 eq(null)
         );
+        verify(acknowledgment).acknowledge();
+    }
+
+    @Test
+    void consume_customPrompt_skipsPromptBuilder() {
+        UUID id = UUID.randomUUID();
+        SummarizerConfig cfg = SummarizerConfig.builder()
+                .id(UUID.randomUUID())
+                .name("openai-route")
+                .provider("OPENAI")
+                .baseUrl("http://litellm:4000")
+                .modelId("gpt")
+                .build();
+        when(summarizerModelRepository.findByName("openai-route")).thenReturn(Optional.of(cfg));
+        when(llmClient.summarize(cfg, "user prompt")).thenReturn("summary-text");
+
+        consumer.consume(new SummarizationTaskEvent(id.toString(), "openai-route", "user prompt"), acknowledgment);
+
+        verifyNoInteractions(promptBuilder);
+        verify(llmClient).summarize(cfg, "user prompt");
         verify(acknowledgment).acknowledge();
     }
 

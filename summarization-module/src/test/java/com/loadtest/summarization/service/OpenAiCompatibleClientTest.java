@@ -141,7 +141,7 @@ class OpenAiCompatibleClientTest {
                 .id(UUID.randomUUID()).name("r").baseUrl("http://h").modelId("m").build();
 
         assertThatThrownBy(() -> new OpenAiCompatibleClient(webClient).summarize(cfg, "p"))
-                .isInstanceOf(RuntimeException.class)
+                .isInstanceOf(OpenAiCompatibleClient.LlmSummarizationException.class)
                 .hasMessageContaining("Unexpected response structure");
     }
 
@@ -175,9 +175,11 @@ class OpenAiCompatibleClientTest {
                 .id(UUID.randomUUID()).name("r").baseUrl("http://h").modelId("m").build();
 
         assertThatThrownBy(() -> new OpenAiCompatibleClient(webClient).summarize(cfg, "p"))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("checked-io")
-                .satisfies(t -> assertThat(t.getCause()).isInstanceOf(IOException.class));
+                .isInstanceOf(OpenAiCompatibleClient.LlmSummarizationException.class)
+                .hasMessageContaining("LLM request failed")
+                .satisfies(t -> assertThat(t.getCause())
+                        .isInstanceOf(IOException.class)
+                        .hasMessageContaining("checked-io"));
     }
 
     @SuppressWarnings("unchecked")
@@ -206,24 +208,24 @@ class OpenAiCompatibleClientTest {
 
         when(responseSpec.bodyToMono(Map.class)).thenReturn(Mono.empty());
         assertThatThrownBy(() -> client.summarize(cfg, "p"))
-                .isInstanceOf(RuntimeException.class)
+                .isInstanceOf(OpenAiCompatibleClient.LlmSummarizationException.class)
                 .hasMessageContaining("Empty response");
 
         when(responseSpec.bodyToMono(Map.class)).thenReturn(Mono.just(Map.of("choices", List.of())));
         assertThatThrownBy(() -> client.summarize(cfg, "p"))
-                .isInstanceOf(RuntimeException.class)
+                .isInstanceOf(OpenAiCompatibleClient.LlmSummarizationException.class)
                 .hasMessageContaining("Unexpected response structure");
 
         when(responseSpec.bodyToMono(Map.class)).thenReturn(Mono.just(Map.of("choices", List.of("x"))));
         assertThatThrownBy(() -> client.summarize(cfg, "p"))
-                .isInstanceOf(RuntimeException.class)
+                .isInstanceOf(OpenAiCompatibleClient.LlmSummarizationException.class)
                 .hasMessageContaining("Unexpected response structure");
 
         when(responseSpec.bodyToMono(Map.class)).thenReturn(Mono.just(
                 Map.of("choices", List.of(Map.of("message", "not-map")))
         ));
         assertThatThrownBy(() -> client.summarize(cfg, "p"))
-                .isInstanceOf(RuntimeException.class)
+                .isInstanceOf(OpenAiCompatibleClient.LlmSummarizationException.class)
                 .hasMessageContaining("Unexpected response structure");
 
         Map<String, Object> messageWithNullContent = new HashMap<>();
@@ -234,12 +236,12 @@ class OpenAiCompatibleClientTest {
                 Map.of("choices", List.of(choiceMap))
         ));
         assertThatThrownBy(() -> client.summarize(cfg, "p"))
-                .isInstanceOf(RuntimeException.class)
+                .isInstanceOf(OpenAiCompatibleClient.LlmSummarizationException.class)
                 .hasMessageContaining("Unexpected response structure");
 
         when(responseSpec.bodyToMono(Map.class)).thenReturn(Mono.error(new RuntimeException("io")));
         assertThatThrownBy(() -> client.summarize(cfg, "p"))
-                .isInstanceOf(RuntimeException.class)
+                .isInstanceOf(OpenAiCompatibleClient.LlmSummarizationException.class)
                 .hasMessageContaining("io");
     }
 }

@@ -53,6 +53,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -368,12 +369,11 @@ class ContainerExecutionServiceTest {
         TestableExecutionService svc = new TestableExecutionService(
                 commandFromDbService, artifactCollectorService, dockerExecutionProfileRepository, docker);
 
-        ExecutionRequest req = baseRequest(testFile, profileId);
-        req.setTaskId(taskId);
+        ExecutionRequest req = withTaskId(baseRequest(testFile, profileId), taskId);
         var response = svc.executeTestWithAutoCleanup(req);
 
-        assertThat(response.getStatus()).isEqualTo("success");
-        assertThat(response.getContainerId()).isEqualTo(CONTAINER_ID);
+        assertThat(response.status()).isEqualTo("success");
+        assertThat(response.containerId()).isEqualTo(CONTAINER_ID);
         verify(artifactCollectorService, times(1)).collectAndSaveArtifacts(eq(taskId), anyString(), any());
         verify(docker, times(1)).removeContainerCmd(CONTAINER_ID);
     }
@@ -402,9 +402,7 @@ class ContainerExecutionServiceTest {
         TestableExecutionService svc = new TestableExecutionService(
                 commandFromDbService, artifactCollectorService, dockerExecutionProfileRepository, docker);
 
-        ExecutionRequest req = baseRequest(testFile, profileId);
-        req.setTaskId(null);
-        assertThat(svc.executeTestWithAutoCleanup(req).getStatus()).isEqualTo("success");
+        assertThat(svc.executeTestWithAutoCleanup(baseRequest(testFile, profileId)).status()).isEqualTo("success");
         verify(artifactCollectorService, never()).collectAndSaveArtifacts(any(), anyString(), any());
     }
 
@@ -541,7 +539,7 @@ class ContainerExecutionServiceTest {
         DockerExecutionProfileEntity profile = DockerExecutionProfileEntity.builder()
                 .id(profileId)
                 .enabled(true)
-                .environmentVariables(new ObjectMapper().writeValueAsString(java.util.Map.of("FOO", "bar")))
+                .environmentVariables(new ObjectMapper().writeValueAsString(Map.of("FOO", "bar")))
                 .build();
         LoadTestToolEntity tool = LoadTestToolEntity.builder()
                 .id(UUID.randomUUID())
@@ -663,9 +661,8 @@ class ContainerExecutionServiceTest {
         DockerClient docker = mockHappyPathDocker();
         TestableExecutionService svc = new TestableExecutionService(
                 commandFromDbService, artifactCollectorService, dockerExecutionProfileRepository, docker);
-        ExecutionRequest req = baseRequest(testFile, profileId);
-        req.setTaskId(taskId);
-        assertThat(svc.executeTestWithAutoCleanup(req).getStatus()).isEqualTo("success");
+        ExecutionRequest req = withTaskId(baseRequest(testFile, profileId), taskId);
+        assertThat(svc.executeTestWithAutoCleanup(req).status()).isEqualTo("success");
     }
 
     @Test
@@ -817,7 +814,7 @@ class ContainerExecutionServiceTest {
 
         TestableExecutionService svc = new TestableExecutionService(
                 commandFromDbService, artifactCollectorService, dockerExecutionProfileRepository, docker);
-        assertThat(svc.executeTestWithAutoCleanup(baseRequest(testFile, profileId)).getStatus()).isEqualTo("success");
+        assertThat(svc.executeTestWithAutoCleanup(baseRequest(testFile, profileId)).status()).isEqualTo("success");
     }
 
     @Test
@@ -848,7 +845,7 @@ class ContainerExecutionServiceTest {
         when(inspectCmd.exec()).thenAnswer(inv -> {
             int n = inspectCount.getAndIncrement();
             if (n == 0) {
-                throw new IOException("inspect transient");
+                throw new RuntimeException("inspect transient");
             }
             if (n == 1) {
                 return named;
@@ -858,7 +855,7 @@ class ContainerExecutionServiceTest {
 
         TestableExecutionService svc = new TestableExecutionService(
                 commandFromDbService, artifactCollectorService, dockerExecutionProfileRepository, docker);
-        assertThat(svc.executeTestWithAutoCleanup(baseRequest(testFile, profileId)).getStatus()).isEqualTo("success");
+        assertThat(svc.executeTestWithAutoCleanup(baseRequest(testFile, profileId)).status()).isEqualTo("success");
     }
 
     @Test
@@ -900,7 +897,7 @@ class ContainerExecutionServiceTest {
         TestableExecutionService svc = new TestableExecutionService(
                 commandFromDbService, artifactCollectorService, dockerExecutionProfileRepository, docker);
         var resp = svc.executeTestWithAutoCleanup(baseRequest(testFile, profileId));
-        assertThat(resp.getContainerName()).isEqualTo(CONTAINER_ID.substring(0, 12));
+        assertThat(resp.containerName()).isEqualTo(CONTAINER_ID.substring(0, 12));
     }
 
     private static final String SHORT_CONTAINER_ID = "abc123456789";
@@ -944,8 +941,8 @@ class ContainerExecutionServiceTest {
         TestableExecutionService svc = new TestableExecutionService(
                 commandFromDbService, artifactCollectorService, dockerExecutionProfileRepository, docker);
         var resp = svc.executeTestWithAutoCleanup(baseRequest(testFile, profileId));
-        assertThat(resp.getContainerName()).startsWith("locust-test-");
-        assertThat(resp.getContainerName()).doesNotStartWith("abc123");
+        assertThat(resp.containerName()).startsWith("locust-test-");
+        assertThat(resp.containerName()).doesNotStartWith("abc123");
     }
 
     @Test
@@ -1003,7 +1000,7 @@ class ContainerExecutionServiceTest {
         TestableExecutionService svc = new TestableExecutionService(
                 commandFromDbService, artifactCollectorService, dockerExecutionProfileRepository, docker);
         var resp = svc.executeTestWithAutoCleanup(baseRequest(testFile, profileId));
-        assertThat(resp.getContainerName()).startsWith("locust-test-");
+        assertThat(resp.containerName()).startsWith("locust-test-");
     }
 
     @Test
@@ -1065,7 +1062,7 @@ class ContainerExecutionServiceTest {
         TestableExecutionService svc = new TestableExecutionService(
                 commandFromDbService, artifactCollectorService, dockerExecutionProfileRepository, docker);
         var resp = svc.executeTestWithAutoCleanup(baseRequest(testFile, profileId));
-        assertThat(resp.getContainerName()).startsWith("locust-test-");
+        assertThat(resp.containerName()).startsWith("locust-test-");
     }
 
     @Test
@@ -1143,7 +1140,7 @@ class ContainerExecutionServiceTest {
 
         TestableExecutionService svc = new TestableExecutionService(
                 commandFromDbService, artifactCollectorService, dockerExecutionProfileRepository, docker);
-        assertThat(svc.executeTestWithAutoCleanup(baseRequest(testFile, profileId)).getStatus()).isEqualTo("success");
+        assertThat(svc.executeTestWithAutoCleanup(baseRequest(testFile, profileId)).status()).isEqualTo("success");
     }
 
     @Test
@@ -1172,7 +1169,7 @@ class ContainerExecutionServiceTest {
 
         TestableExecutionService svc = new TestableExecutionService(
                 commandFromDbService, artifactCollectorService, dockerExecutionProfileRepository, docker);
-        assertThat(svc.executeTestWithAutoCleanup(baseRequest(testFile, profileId)).getStatus()).isEqualTo("success");
+        assertThat(svc.executeTestWithAutoCleanup(baseRequest(testFile, profileId)).status()).isEqualTo("success");
         verify(docker, times(1)).removeContainerCmd(CONTAINER_ID);
     }
 
@@ -1326,7 +1323,7 @@ class ContainerExecutionServiceTest {
         CreateContainerCmd createCmd = mock(CreateContainerCmd.class, RETURNS_SELF);
         when(docker.createContainerCmd(anyString())).thenReturn(createCmd);
         when(createCmd.exec()).thenAnswer(inv -> {
-            throw new IOException("create io");
+            throw new RuntimeException("create io");
         });
 
         TestableExecutionService svc = new TestableExecutionService(
@@ -1334,7 +1331,6 @@ class ContainerExecutionServiceTest {
 
         assertThatThrownBy(() -> svc.executeTestWithAutoCleanup(baseRequest(testFile, profileId)))
                 .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Failed to execute test")
                 .hasMessageContaining("create io");
         verify(docker, never()).startContainerCmd(anyString());
         verify(docker, never()).stopContainerCmd(anyString());
@@ -1364,7 +1360,7 @@ class ContainerExecutionServiceTest {
         StartContainerCmd startCmd = mock(StartContainerCmd.class);
         when(docker.startContainerCmd(CONTAINER_ID)).thenReturn(startCmd);
         when(startCmd.exec()).thenAnswer(inv -> {
-            throw new IOException("start io");
+            throw new RuntimeException("start io");
         });
 
         StopContainerCmd stopCmd = mock(StopContainerCmd.class);
@@ -1381,7 +1377,6 @@ class ContainerExecutionServiceTest {
 
         assertThatThrownBy(() -> svc.executeTestWithAutoCleanup(baseRequest(testFile, profileId)))
                 .isInstanceOf(RuntimeException.class)
-                .hasMessageContaining("Failed to execute test")
                 .hasMessageContaining("start io");
         verify(stopCmd, atLeastOnce()).exec();
         verify(removeCmd, atLeastOnce()).exec();
@@ -1413,7 +1408,7 @@ class ContainerExecutionServiceTest {
 
         TestableExecutionService svc = new TestableExecutionService(
                 commandFromDbService, artifactCollectorService, dockerExecutionProfileRepository, docker);
-        assertThat(svc.executeTestWithAutoCleanup(baseRequest(testFile, profileId)).getStatus()).isEqualTo("success");
+        assertThat(svc.executeTestWithAutoCleanup(baseRequest(testFile, profileId)).status()).isEqualTo("success");
     }
 
     @Test
@@ -1873,12 +1868,23 @@ class ContainerExecutionServiceTest {
     }
 
     private ExecutionRequest baseRequest(Path testFile, UUID profileId) {
-        ExecutionRequest req = new ExecutionRequest();
-        req.setTestTool("locust");
-        req.setCommand("locust -f /mnt/test/{fileName}");
-        req.setTestFilePath(testFile.toAbsolutePath().toString());
-        req.setDockerExecutionProfileId(profileId);
-        return req;
+        return new ExecutionRequest(
+                "locust",
+                "locust -f /mnt/test/{fileName}",
+                testFile.toAbsolutePath().toString(),
+                null,
+                null,
+                profileId);
+    }
+
+    private ExecutionRequest withTaskId(ExecutionRequest base, UUID taskId) {
+        return new ExecutionRequest(
+                base.testTool(),
+                base.command(),
+                base.testFilePath(),
+                taskId,
+                base.expectedDurationSeconds(),
+                base.dockerExecutionProfileId());
     }
 
     private void stubCommonCommandSideEffects(Path dir) {

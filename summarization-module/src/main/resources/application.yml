@@ -5,11 +5,16 @@ spring:
   application:
     name: summarization-service
   datasource:
-    url: jdbc:postgresql://localhost:5432/loadtest
-    username: loadtest
-    password: loadtest
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/loadtest}
+    username: ${SPRING_DATASOURCE_USERNAME:loadtest}
+    password: ${SPRING_DATASOURCE_PASSWORD:loadtest}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    open-in-view: false
   kafka:
-    bootstrap-servers: localhost:9092
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
       group-id: summarization-service-group
       auto-offset-reset: earliest

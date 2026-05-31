@@ -674,7 +674,7 @@ class ExecutionPersistenceLombokBranchExhaustiveTest {
             var ctor = t.getDeclaredConstructor();
             ctor.setAccessible(true);
             return ctor.newInstance();
-        } catch (Exception ignored) {
+        } catch (ReflectiveOperationException ignored) {
             return seed == 1 ? new LinkedHashMap<>() : new ArrayList<>();
         }
     }

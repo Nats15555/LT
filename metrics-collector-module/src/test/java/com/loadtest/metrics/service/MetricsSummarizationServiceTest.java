@@ -17,13 +17,13 @@ class MetricsSummarizationServiceTest {
                 "a", Map.of("v", 1),
                 "b", Map.of("error", "bad")
         ));
-        assertThat(ok.getStatus()).isEqualTo("SUCCESS");
-        assertThat(ok.getSummary()).contains("2 endpoint");
-        assertThat(ok.getDetails()).containsKey("totalEndpoints");
+        assertThat(ok.status()).isEqualTo("SUCCESS");
+        assertThat(ok.summary()).contains("2 endpoint");
+        assertThat(ok.details()).containsKey("totalEndpoints");
 
         MetricsCollectionResponse.SummaryResult empty = service.summarize("t2", Map.of());
-        assertThat(empty.getStatus()).isEqualTo("SUCCESS");
-        assertThat(empty.getSummary()).contains("0 endpoint");
+        assertThat(empty.status()).isEqualTo("SUCCESS");
+        assertThat(empty.summary()).contains("0 endpoint");
     }
 
     @Test
@@ -31,8 +31,8 @@ class MetricsSummarizationServiceTest {
         MetricsSummarizationService service = new MetricsSummarizationService();
 
         MetricsCollectionResponse.SummaryResult failed = service.summarize("t3", null);
-        assertThat(failed.getStatus()).isEqualTo("FAILED");
-        assertThat(failed.getSummary()).contains("Failed to summarize metrics");
+        assertThat(failed.status()).isEqualTo("FAILED");
+        assertThat(failed.summary()).contains("Failed to summarize metrics");
     }
 
     @Test
@@ -44,8 +44,7 @@ class MetricsSummarizationServiceTest {
                 "plain", "raw-value"
         ));
 
-        assertThat(result.getStatus()).isEqualTo("SUCCESS");
-        assertThat(result.getSummary()).contains("2 endpoint(s), 1 successful, 1 failed");
+        assertThat(result.status()).isEqualTo("SUCCESS");
+        assertThat(result.summary()).contains("2 endpoint(s), 1 successful, 1 failed");
     }
 }
-

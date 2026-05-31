@@ -5,7 +5,9 @@ import com.loadtest.app.dto.LoadTestToolDto;
 import com.loadtest.app.dto.UpdateLoadTestToolRequest;
 import com.loadtest.app.persistence.LoadTestToolEntity;
 import com.loadtest.app.persistence.LoadTestToolRepository;
+import com.loadtest.app.util.ApiMessages;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.Query;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -14,8 +16,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
-import java.util.stream.Collectors;
-
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -26,30 +26,16 @@ public class LoadTestToolService {
 
     @Transactional
     public LoadTestToolDto createTool(CreateLoadTestToolRequest request) {
-        if (toolRepository.existsByName(request.getName())) {
-            throw new IllegalArgumentException("Tool with name '" + request.getName() + "' already exists");
+        if (toolRepository.existsByName(request.name())) {
+            throw new IllegalArgumentException(ApiMessages.Tools.nameAlreadyExists(request.name()));
         }
 
         UUID id = UUID.randomUUID();
         OffsetDateTime now = OffsetDateTime.now();
-        String name = request.getName().toUpperCase();
-        Boolean enabled = request.getEnabled();
+        String name = request.name().toUpperCase();
+        Boolean enabled = request.enabled();
 
-        String fileExtensionsStr;
-        if (request.getFileExtensions() != null && !request.getFileExtensions().isEmpty()) {
-            StringBuilder sb = new StringBuilder("{");
-            for (int i = 0; i < request.getFileExtensions().size(); i++) {
-                if (i > 0) sb.append(",");
-                String ext = request.getFileExtensions().get(i)
-                        .replace("\\", "\\\\")
-                        .replace("\"", "\\\"");
-                sb.append("\"").append(ext).append("\"");
-            }
-            sb.append("}");
-            fileExtensionsStr = sb.toString();
-        } else {
-            fileExtensionsStr = "{}";
-        }
+        String fileExtensionsStr = formatFileExtensionsLiteral(request.fileExtensions());
 
         String sql = """
             INSERT INTO load_test_tools (
@@ -65,7 +51,7 @@ public class LoadTestToolService {
         entityManager.createNativeQuery(sql)
                 .setParameter("id", id)
                 .setParameter("name", name)
-                .setParameter("dockerImage", request.getDockerImage())
+                .setParameter("dockerImage", request.dockerImage())
                 .setParameter("fileExtensionsStr", fileExtensionsStr)
                 .setParameter("enabled", enabled)
                 .setParameter("createdAt", now)
@@ -84,107 +70,124 @@ public class LoadTestToolService {
     public List<LoadTestToolDto> getAllTools() {
         return toolRepository.findAll().stream()
                 .map(this::toDto)
-                .collect(Collectors.toList());
+                .toList();
     }
 
     @Transactional(readOnly = true)
     public List<LoadTestToolDto> getEnabledTools() {
         return toolRepository.findByEnabledTrue().stream()
                 .map(this::toDto)
-                .collect(Collectors.toList());
+                .toList();
     }
 
     @Transactional(readOnly = true)
     public LoadTestToolDto getToolById(UUID id) {
         LoadTestToolEntity entity = toolRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Tool with id '" + id + "' not found"));
+                .orElseThrow(() -> new IllegalArgumentException(ApiMessages.Tools.notFoundById(id)));
         return toDto(entity);
     }
 
     @Transactional(readOnly = true)
     public LoadTestToolDto getToolByName(String name) {
         LoadTestToolEntity entity = toolRepository.findByName(name.toUpperCase())
-                .orElseThrow(() -> new IllegalArgumentException("Tool with name '" + name + "' not found"));
+                .orElseThrow(() -> new IllegalArgumentException(ApiMessages.Tools.notFoundByName(name)));
         return toDto(entity);
     }
 
     @Transactional
     public LoadTestToolDto updateTool(UUID id, UpdateLoadTestToolRequest request) {
         if (!toolRepository.existsById(id)) {
-            throw new IllegalArgumentException("Tool with id '" + id + "' not found");
+            throw new IllegalArgumentException(ApiMessages.Tools.notFoundById(id));
         }
-
-        StringBuilder sqlBuilder = new StringBuilder("UPDATE load_test_tools SET updated_at = :updatedAt");
-        boolean hasUpdates = false;
-
-        if (request.getDockerImage() != null) {
-            sqlBuilder.append(", docker_image = :dockerImage");
-            hasUpdates = true;
-        }
-        if (request.getFileExtensions() != null) {
-            sqlBuilder.append(", file_extensions = CAST(:fileExtensions AS text[])");
-            hasUpdates = true;
-        }
-        if (request.getEnabled() != null) {
-            sqlBuilder.append(", enabled = :enabled");
-            hasUpdates = true;
-        }
-
-        if (hasUpdates) {
-            sqlBuilder.append(" WHERE id = :id");
-
-            var query = entityManager.createNativeQuery(sqlBuilder.toString())
-                    .setParameter("id", id)
-                    .setParameter("updatedAt", OffsetDateTime.now());
-
-            if (request.getDockerImage() != null) {
-                query.setParameter("dockerImage", request.getDockerImage());
-            }
-            if (request.getFileExtensions() != null) {
-                StringBuilder sb = new StringBuilder("{");
-                for (int i = 0; i < request.getFileExtensions().size(); i++) {
-                    if (i > 0) sb.append(",");
-                    String ext = request.getFileExtensions().get(i)
-                            .replace("\\", "\\\\")
-                            .replace("\"", "\\\"");
-                    sb.append("\"").append(ext).append("\"");
-                }
-                sb.append("}");
-                query.setParameter("fileExtensions", sb.toString());
-            }
-            if (request.getEnabled() != null) {
-                query.setParameter("enabled", request.getEnabled());
-            }
-
-            query.executeUpdate();
+        if (hasAnyToolUpdate(request)) {
+            executeToolUpdate(id, request);
         }
 
         LoadTestToolEntity updated = toolRepository.findById(id)
                 .orElseThrow(() -> new IllegalStateException("Failed to update tool: " + id));
-        
+
         log.info("Updated load test tool: {} (id: {})", updated.getName(), updated.getId());
-        
+
         return toDto(updated);
+    }
+
+    private static boolean hasAnyToolUpdate(UpdateLoadTestToolRequest request) {
+        return request.dockerImage() != null
+                || request.fileExtensions() != null
+                || request.enabled() != null;
+    }
+
+    private void executeToolUpdate(UUID id, UpdateLoadTestToolRequest request) {
+        StringBuilder sql = new StringBuilder("UPDATE load_test_tools SET updated_at = :updatedAt");
+        appendToolUpdateColumns(sql, request);
+        sql.append(" WHERE id = :id");
+
+        Query query = entityManager.createNativeQuery(sql.toString())
+                .setParameter("id", id)
+                .setParameter("updatedAt", OffsetDateTime.now());
+        bindToolUpdateParameters(query, request);
+        query.executeUpdate();
+    }
+
+    private static void appendToolUpdateColumns(StringBuilder sql, UpdateLoadTestToolRequest request) {
+        if (request.dockerImage() != null) {
+            sql.append(", docker_image = :dockerImage");
+        }
+        if (request.fileExtensions() != null) {
+            sql.append(", file_extensions = CAST(:fileExtensions AS text[])");
+        }
+        if (request.enabled() != null) {
+            sql.append(", enabled = :enabled");
+        }
+    }
+
+    private void bindToolUpdateParameters(Query query, UpdateLoadTestToolRequest request) {
+        if (request.dockerImage() != null) {
+            query.setParameter("dockerImage", request.dockerImage());
+        }
+        if (request.fileExtensions() != null) {
+            query.setParameter("fileExtensions", formatFileExtensionsLiteral(request.fileExtensions()));
+        }
+        if (request.enabled() != null) {
+            query.setParameter("enabled", request.enabled());
+        }
+    }
+
+    private static String formatFileExtensionsLiteral(List<String> extensions) {
+        if (extensions == null || extensions.isEmpty()) {
+            return "{}";
+        }
+        StringBuilder sb = new StringBuilder("{");
+        for (int i = 0; i < extensions.size(); i++) {
+            if (i > 0) {
+                sb.append(",");
+            }
+            String ext = extensions.get(i)
+                    .replace("\\", "\\\\")
+                    .replace("\"", "\\\"");
+            sb.append("\"").append(ext).append("\"");
+        }
+        sb.append("}");
+        return sb.toString();
     }
 
     @Transactional
     public void deleteTool(UUID id) {
         if (!toolRepository.existsById(id)) {
-            throw new IllegalArgumentException("Tool with id '" + id + "' not found");
+            throw new IllegalArgumentException(ApiMessages.Tools.notFoundById(id));
         }
         toolRepository.deleteById(id);
         log.info("Deleted load test tool (id: {})", id);
     }
 
     private LoadTestToolDto toDto(LoadTestToolEntity entity) {
-        return LoadTestToolDto.builder()
-                .id(entity.getId())
-                .name(entity.getName())
-                .dockerImage(entity.getDockerImage())
-                .fileExtensions(entity.getFileExtensions())
-                .enabled(entity.getEnabled())
-                .createdAt(entity.getCreatedAt())
-                .updatedAt(entity.getUpdatedAt())
-                .build();
+        return new LoadTestToolDto(
+                entity.getId(),
+                entity.getName(),
+                entity.getDockerImage(),
+                entity.getFileExtensions(),
+                entity.getEnabled(),
+                entity.getCreatedAt(),
+                entity.getUpdatedAt());
     }
 }

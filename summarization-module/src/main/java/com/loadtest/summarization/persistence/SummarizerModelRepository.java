@@ -2,54 +2,48 @@ package com.loadtest.summarization.persistence;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
-import java.util.UUID;
 
 @Slf4j
 @Repository
 public class SummarizerModelRepository {
 
-    private final JdbcTemplate jdbcTemplate;
-
+    private final SummarizerModelJpaRepository summarizerModelJpaRepository;
     private final String litellmBaseUrlOverride;
 
     public SummarizerModelRepository(
-            JdbcTemplate jdbcTemplate,
+            SummarizerModelJpaRepository summarizerModelJpaRepository,
             @Value("${loadtest.summarization.litellm-base-url-override:}") String litellmBaseUrlOverride) {
-        this.jdbcTemplate = jdbcTemplate;
+        this.summarizerModelJpaRepository = summarizerModelJpaRepository;
         this.litellmBaseUrlOverride = litellmBaseUrlOverride;
     }
 
     public Optional<SummarizerConfig> findByName(String name) {
-        String sql = "SELECT id, name, COALESCE(provider, 'OPENAI') AS provider, base_url, model_id, api_key_env_var FROM summarizer_models WHERE name = ? AND enabled = true";
         try {
-            return jdbcTemplate.query(sql, rs -> {
-                if (rs.next()) {
-                    String apiKeyEnvVar = rs.getString("api_key_env_var");
-                    String apiKeyResolved = null;
-                    if (apiKeyEnvVar != null && !apiKeyEnvVar.isBlank()) {
-                        apiKeyResolved = System.getenv(apiKeyEnvVar);
-                    }
-                    String baseUrl = applyLitellmBaseUrlOverride(rs.getString("base_url"));
-                    return Optional.of(SummarizerConfig.builder()
-                            .id(UUID.fromString(rs.getString("id")))
-                            .name(rs.getString("name"))
-                            .provider(rs.getString("provider"))
-                            .baseUrl(baseUrl)
-                            .modelId(rs.getString("model_id"))
-                            .apiKeyEnvVar(apiKeyEnvVar)
-                            .apiKeyResolved(apiKeyResolved)
-                            .build());
-                }
-                return Optional.empty();
-            }, name);
-        } catch (Exception e) {
+            return summarizerModelJpaRepository.findByNameAndEnabledTrue(name).map(this::toConfig);
+        } catch (RuntimeException e) {
             log.warn("Failed to load summarizer by name: {}", name, e);
             return Optional.empty();
         }
+    }
+
+    private SummarizerConfig toConfig(SummarizerModelEntity entity) {
+        String apiKeyEnvVar = entity.getApiKeyEnvVar();
+        String apiKeyResolved = null;
+        if (apiKeyEnvVar != null && !apiKeyEnvVar.isBlank()) {
+            apiKeyResolved = System.getenv(apiKeyEnvVar);
+        }
+        return SummarizerConfig.builder()
+                .id(entity.getId())
+                .name(entity.getName())
+                .provider(entity.getProvider())
+                .baseUrl(applyLitellmBaseUrlOverride(entity.getBaseUrl()))
+                .modelId(entity.getModelId())
+                .apiKeyEnvVar(apiKeyEnvVar)
+                .apiKeyResolved(apiKeyResolved)
+                .build();
     }
 
     private String applyLitellmBaseUrlOverride(String baseUrl) {

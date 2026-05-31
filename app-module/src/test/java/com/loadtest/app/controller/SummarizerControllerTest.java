@@ -26,6 +26,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static com.loadtest.app.testsupport.JsonTestSupport.writeValueAsString;
+import static com.loadtest.app.testsupport.MockMvcTestSupport.perform;
 
 @WebMvcTest(controllers = SummarizerController.class)
 class SummarizerControllerTest {
@@ -39,126 +41,114 @@ class SummarizerControllerTest {
     private SummarizerService summarizerService;
 
     private SummarizerModelDto sample() {
-        return SummarizerModelDto.builder()
-                .id(UUID.randomUUID())
-                .name("s1")
-                .provider("OPENAI")
-                .modelId("m")
-                .enabled(true)
-                .createdAt(OffsetDateTime.MIN)
-                .updatedAt(OffsetDateTime.MIN)
-                .build();
+        return new SummarizerModelDto(
+                UUID.randomUUID(), "s1", "OPENAI", null, "m", null, true, OffsetDateTime.MIN, OffsetDateTime.MIN);
     }
 
     @Test
-    void create_getList_getById_getByName_update_delete() throws Exception {
-        CreateSummarizerRequest createReq = CreateSummarizerRequest.builder()
-                .name("s1")
-                .modelId("m")
-                .enabled(true)
-                .build();
+    void create_getList_getById_getByName_update_delete() {
+        CreateSummarizerRequest createReq = new CreateSummarizerRequest("s1", null, null, "m", null, true);
         when(summarizerService.create(any())).thenReturn(sample());
 
-        mockMvc.perform(post("/api/v1/loadtest/summarizers")
+        perform(mockMvc, post("/api/v1/loadtest/summarizers")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(createReq)))
+                        .content(writeValueAsString(objectMapper, createReq)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.name").value("s1"));
 
         when(summarizerService.getAll()).thenReturn(List.of(sample()));
-        mockMvc.perform(get("/api/v1/loadtest/summarizers"))
+        perform(mockMvc, get("/api/v1/loadtest/summarizers"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].name").value("s1"));
 
         when(summarizerService.getEnabled()).thenReturn(List.of());
-        mockMvc.perform(get("/api/v1/loadtest/summarizers").param("enabled", "true"))
+        perform(mockMvc, get("/api/v1/loadtest/summarizers").param("enabled", "true"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data").isEmpty());
 
         UUID id = UUID.randomUUID();
         when(summarizerService.getById(id)).thenReturn(sample());
-        mockMvc.perform(get("/api/v1/loadtest/summarizers/{id}", id))
+        perform(mockMvc, get("/api/v1/loadtest/summarizers/{id}", id))
                 .andExpect(status().isOk());
 
         when(summarizerService.getByName("s1")).thenReturn(sample());
-        mockMvc.perform(get("/api/v1/loadtest/summarizers/name/{name}", "s1"))
+        perform(mockMvc, get("/api/v1/loadtest/summarizers/name/{name}", "s1"))
                 .andExpect(status().isOk());
 
-        UpdateSummarizerRequest upd = new UpdateSummarizerRequest();
-        upd.setEnabled(false);
+        UpdateSummarizerRequest upd = new UpdateSummarizerRequest(null, null, null, null, false);
         when(summarizerService.update(eq(id), any())).thenReturn(sample());
-        mockMvc.perform(put("/api/v1/loadtest/summarizers/{id}", id)
+        perform(mockMvc, put("/api/v1/loadtest/summarizers/{id}", id)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(upd)))
+                        .content(writeValueAsString(objectMapper, upd)))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(delete("/api/v1/loadtest/summarizers/{id}", id))
+        perform(mockMvc, delete("/api/v1/loadtest/summarizers/{id}", id))
                 .andExpect(status().isOk());
     }
 
     @Test
-    void getById_notFound() throws Exception {
+    void getById_notFound() {
         UUID id = UUID.randomUUID();
         when(summarizerService.getById(id)).thenThrow(new IllegalArgumentException("nope"));
-        mockMvc.perform(get("/api/v1/loadtest/summarizers/{id}", id))
+        perform(mockMvc, get("/api/v1/loadtest/summarizers/{id}", id))
                 .andExpect(status().isNotFound());
     }
 
     @Test
-    void runtimeExceptions_return500() throws Exception {
+    void runtimeExceptions_return500() {
         when(summarizerService.getAll()).thenThrow(new RuntimeException("db"));
-        mockMvc.perform(get("/api/v1/loadtest/summarizers"))
+        perform(mockMvc, get("/api/v1/loadtest/summarizers"))
                 .andExpect(status().isInternalServerError());
 
         when(summarizerService.getByName("x")).thenThrow(new RuntimeException("boom"));
-        mockMvc.perform(get("/api/v1/loadtest/summarizers/name/{name}", "x"))
+        perform(mockMvc, get("/api/v1/loadtest/summarizers/name/{name}", "x"))
                 .andExpect(status().isInternalServerError());
 
         UUID id = UUID.randomUUID();
         when(summarizerService.getById(id)).thenThrow(new RuntimeException("boom"));
-        mockMvc.perform(get("/api/v1/loadtest/summarizers/{id}", id))
+        perform(mockMvc, get("/api/v1/loadtest/summarizers/{id}", id))
                 .andExpect(status().isInternalServerError());
 
         when(summarizerService.update(eq(id), any())).thenThrow(new RuntimeException("boom"));
-        mockMvc.perform(put("/api/v1/loadtest/summarizers/{id}", id)
+        perform(mockMvc, put("/api/v1/loadtest/summarizers/{id}", id)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new UpdateSummarizerRequest())))
+                        .content(writeValueAsString(objectMapper, new UpdateSummarizerRequest(null, null, null, null, null))))
                 .andExpect(status().isInternalServerError());
 
         doThrow(new RuntimeException("boom")).when(summarizerService).delete(id);
-        mockMvc.perform(delete("/api/v1/loadtest/summarizers/{id}", id))
+        perform(mockMvc, delete("/api/v1/loadtest/summarizers/{id}", id))
                 .andExpect(status().isInternalServerError());
     }
 
     @Test
-    void create_and_notFound_branches() throws Exception {
-        CreateSummarizerRequest req = CreateSummarizerRequest.builder().name("x").modelId("m").build();
+    void create_and_notFound_branches() {
+        CreateSummarizerRequest req = new CreateSummarizerRequest("x", null, null, "m", null, null);
         when(summarizerService.create(any())).thenThrow(new IllegalArgumentException("bad"));
-        mockMvc.perform(post("/api/v1/loadtest/summarizers")
+        perform(mockMvc, post("/api/v1/loadtest/summarizers")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(req)))
+                        .content(writeValueAsString(objectMapper, req)))
                 .andExpect(status().isBadRequest());
 
         UUID id = UUID.randomUUID();
         when(summarizerService.getByName("missing")).thenThrow(new IllegalArgumentException("no"));
-        mockMvc.perform(get("/api/v1/loadtest/summarizers/name/{name}", "missing"))
+        perform(mockMvc, get("/api/v1/loadtest/summarizers/name/{name}", "missing"))
                 .andExpect(status().isNotFound());
 
         when(summarizerService.update(eq(id), any())).thenThrow(new IllegalArgumentException("no"));
-        mockMvc.perform(put("/api/v1/loadtest/summarizers/{id}", id)
+        perform(mockMvc, put("/api/v1/loadtest/summarizers/{id}", id)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new UpdateSummarizerRequest())))
+                        .content(writeValueAsString(objectMapper, new UpdateSummarizerRequest(null, null, null, null, null))))
                 .andExpect(status().isNotFound());
 
         doThrow(new IllegalArgumentException("no")).when(summarizerService).delete(id);
-        mockMvc.perform(delete("/api/v1/loadtest/summarizers/{id}", id))
+        perform(mockMvc, delete("/api/v1/loadtest/summarizers/{id}", id))
                 .andExpect(status().isNotFound());
     }
 
     @Test
-    void getAll_withEnabledFalse_usesAllBranch() throws Exception {
+    void getAll_withEnabledFalse_usesAllBranch() {
         when(summarizerService.getAll()).thenReturn(List.of(sample()));
-        mockMvc.perform(get("/api/v1/loadtest/summarizers").param("enabled", "false"))
+        perform(mockMvc, get("/api/v1/loadtest/summarizers").param("enabled", "false"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].name").value("s1"));
     }

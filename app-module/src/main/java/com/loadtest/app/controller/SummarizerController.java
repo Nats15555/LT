@@ -4,6 +4,8 @@ import com.loadtest.app.dto.CreateSummarizerRequest;
 import com.loadtest.app.dto.SummarizerModelDto;
 import com.loadtest.app.dto.UpdateSummarizerRequest;
 import com.loadtest.app.service.SummarizerService;
+import com.loadtest.app.util.ApiJsonKeys;
+import com.loadtest.app.util.ApiMessages;
 import com.loadtest.app.util.ResponseHelper;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -12,7 +14,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -26,90 +27,86 @@ public class SummarizerController {
     private final SummarizerService summarizerService;
 
     @PostMapping
-    public ResponseEntity<?> create(@Valid @RequestBody CreateSummarizerRequest request) {
+    public ResponseEntity<Map<String, Object>> create(@Valid @RequestBody CreateSummarizerRequest request) {
         try {
             SummarizerModelDto dto = summarizerService.create(request);
-            Map<String, Object> data = new HashMap<>();
-            data.put("data", dto);
-            return ResponseHelper.buildSuccessResponse(HttpStatus.CREATED, "Summarizer created successfully", data);
+            return ResponseHelper.buildSuccessResponse(HttpStatus.CREATED, ApiMessages.Summarizers.CREATED, Map.of(ApiJsonKeys.DATA, dto));
         } catch (IllegalArgumentException e) {
             return ResponseHelper.buildErrorResponse(HttpStatus.BAD_REQUEST, e.getMessage());
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.error("Failed to create summarizer", e);
-            return ResponseHelper.buildErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to create summarizer: " + e.getMessage());
+            return ResponseHelper.buildErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR,
+                    ApiMessages.Summarizers.FAILED_CREATE_PREFIX + e.getMessage());
         }
     }
 
     @GetMapping
-    public ResponseEntity<?> getAll(@RequestParam(required = false) Boolean enabled) {
+    public ResponseEntity<Map<String, Object>> getAll(@RequestParam(required = false) Boolean enabled) {
         try {
             List<SummarizerModelDto> list = enabled != null && enabled
                     ? summarizerService.getEnabled()
                     : summarizerService.getAll();
-            Map<String, Object> data = new HashMap<>();
-            data.put("data", list);
-            return ResponseHelper.buildSuccessResponse(HttpStatus.OK, "Summarizers retrieved successfully", data);
-        } catch (Exception e) {
+            return ResponseHelper.buildSuccessResponse(HttpStatus.OK, ApiMessages.Summarizers.LIST_RETRIEVED, Map.of(ApiJsonKeys.DATA, list));
+        } catch (RuntimeException e) {
             log.error("Failed to get summarizers", e);
-            return ResponseHelper.buildErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to get summarizers: " + e.getMessage());
+            return ResponseHelper.buildErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR,
+                    ApiMessages.Summarizers.FAILED_LIST_PREFIX + e.getMessage());
         }
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<?> getById(@PathVariable UUID id) {
+    public ResponseEntity<Map<String, Object>> getById(@PathVariable UUID id) {
         try {
             SummarizerModelDto dto = summarizerService.getById(id);
-            Map<String, Object> data = new HashMap<>();
-            data.put("data", dto);
-            return ResponseHelper.buildSuccessResponse(HttpStatus.OK, "Summarizer retrieved successfully", data);
+            return ResponseHelper.buildSuccessResponse(HttpStatus.OK, ApiMessages.Summarizers.RETRIEVED, Map.of(ApiJsonKeys.DATA, dto));
         } catch (IllegalArgumentException e) {
             return ResponseHelper.buildErrorResponse(HttpStatus.NOT_FOUND, e.getMessage());
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.error("Failed to get summarizer by id: {}", id, e);
-            return ResponseHelper.buildErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to get summarizer: " + e.getMessage());
+            return ResponseHelper.buildErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR,
+                    ApiMessages.Summarizers.FAILED_GET_PREFIX + e.getMessage());
         }
     }
 
     @GetMapping("/name/{name}")
-    public ResponseEntity<?> getByName(@PathVariable String name) {
+    public ResponseEntity<Map<String, Object>> getByName(@PathVariable String name) {
         try {
             SummarizerModelDto dto = summarizerService.getByName(name);
-            Map<String, Object> data = new HashMap<>();
-            data.put("data", dto);
-            return ResponseHelper.buildSuccessResponse(HttpStatus.OK, "Summarizer retrieved successfully", data);
+            return ResponseHelper.buildSuccessResponse(HttpStatus.OK, ApiMessages.Summarizers.RETRIEVED, Map.of(ApiJsonKeys.DATA, dto));
         } catch (IllegalArgumentException e) {
             return ResponseHelper.buildErrorResponse(HttpStatus.NOT_FOUND, e.getMessage());
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.error("Failed to get summarizer by name: {}", name, e);
-            return ResponseHelper.buildErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to get summarizer: " + e.getMessage());
+            return ResponseHelper.buildErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR,
+                    ApiMessages.Summarizers.FAILED_GET_PREFIX + e.getMessage());
         }
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<?> update(@PathVariable UUID id, @Valid @RequestBody UpdateSummarizerRequest request) {
+    public ResponseEntity<Map<String, Object>> update(@PathVariable UUID id, @Valid @RequestBody UpdateSummarizerRequest request) {
         try {
             SummarizerModelDto dto = summarizerService.update(id, request);
-            Map<String, Object> data = new HashMap<>();
-            data.put("data", dto);
-            return ResponseHelper.buildSuccessResponse(HttpStatus.OK, "Summarizer updated successfully", data);
+            return ResponseHelper.buildSuccessResponse(HttpStatus.OK, ApiMessages.Summarizers.UPDATED, Map.of(ApiJsonKeys.DATA, dto));
         } catch (IllegalArgumentException e) {
             return ResponseHelper.buildErrorResponse(HttpStatus.NOT_FOUND, e.getMessage());
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.error("Failed to update summarizer: {}", id, e);
-            return ResponseHelper.buildErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to update summarizer: " + e.getMessage());
+            return ResponseHelper.buildErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR,
+                    ApiMessages.Summarizers.FAILED_UPDATE_PREFIX + e.getMessage());
         }
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<?> delete(@PathVariable UUID id) {
+    public ResponseEntity<Map<String, Object>> delete(@PathVariable UUID id) {
         try {
             summarizerService.delete(id);
-            return ResponseHelper.buildSuccessResponse(HttpStatus.OK, "Summarizer deleted successfully", null);
+            return ResponseHelper.buildSuccessResponse(HttpStatus.OK, ApiMessages.Summarizers.DELETED, null);
         } catch (IllegalArgumentException e) {
             return ResponseHelper.buildErrorResponse(HttpStatus.NOT_FOUND, e.getMessage());
-        } catch (Exception e) {
-            log.error("Failed to delete summarizer: {}", id, e);
-            return ResponseHelper.buildErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to delete summarizer: " + e.getMessage());
+        } catch (RuntimeException e) {
+            log.error("Failed to delete summarizer", e);
+            return ResponseHelper.buildErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR,
+                    ApiMessages.Summarizers.FAILED_DELETE_PREFIX + e.getMessage());
         }
     }
 }

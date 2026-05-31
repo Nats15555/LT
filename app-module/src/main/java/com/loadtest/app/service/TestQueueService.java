@@ -8,7 +8,9 @@ import com.loadtest.app.persistence.TestTaskHistoryEntity;
 import com.loadtest.app.persistence.TestTaskHistoryRepository;
 import com.loadtest.app.persistence.TestTaskRepository;
 import com.loadtest.app.persistence.TestTaskStatus;
+import com.loadtest.app.util.NativeQueryParams;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.Query;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -25,6 +27,8 @@ import java.time.OffsetDateTime;
 @Service
 @RequiredArgsConstructor
 public class TestQueueService {
+
+    private static final int DEFAULT_EXPECTED_DURATION_SECONDS = 60;
 
     public enum DeletePendingQueueTaskOutcome {
         DELETED,
@@ -47,43 +51,89 @@ public class TestQueueService {
                               String command, Integer expectedDurationSeconds,
                               TestTaskMessage.MetricsConfig metricsConfig, String metricsConfigJson,
                               String summarizerName,
-                              java.util.UUID dockerExecutionProfileId) {
-        String taskId = UUID.randomUUID().toString();
+                              UUID dockerExecutionProfileId) {
+        return doEnqueueTest(testTool, testFileName, testFileContent, command, expectedDurationSeconds,
+                metricsConfig, metricsConfigJson, summarizerName, dockerExecutionProfileId);
+    }
 
+    @Transactional
+    public String rerunFromHistory(UUID fromHistoryTaskId, String summarizerOverride) {
+        TestTaskHistoryEntity history = historyRepository.findById(fromHistoryTaskId)
+                .orElseThrow(() -> new IllegalArgumentException("History record not found: " + fromHistoryTaskId));
+        return doEnqueueTest(
+                history.getTestTool(),
+                history.getTestFileName(),
+                history.getTestFileContentBase64(),
+                history.getCommand(),
+                resolveExpectedDurationSeconds(history.getExpectedDurationSeconds()),
+                null,
+                history.getMetricsConfig(),
+                resolveSummarizerForRerun(summarizerOverride, history.getSummarizerName()),
+                history.getDockerExecutionProfileId());
+    }
+
+    private String doEnqueueTest(String testTool, String testFileName, String testFileContent,
+                                 String command, Integer expectedDurationSeconds,
+                                 TestTaskMessage.MetricsConfig metricsConfig, String metricsConfigJson,
+                                 String summarizerName,
+                                 UUID dockerExecutionProfileId) {
+        String taskId = UUID.randomUUID().toString();
+        logEnqueueDetails(taskId, testTool, testFileName, testFileContent, command, metricsConfig);
+
+        UUID taskUuid = UUID.fromString(taskId);
+        UUID profileId = resolveDockerExecutionProfileId(dockerExecutionProfileId);
+        insertPendingTestTask(taskUuid, testTool, testFileName, testFileContent, command,
+                expectedDurationSeconds, metricsConfigJson, summarizerName, profileId);
+        registerTestTaskKafkaDispatchAfterCommit(taskId, taskUuid);
+        return taskId;
+    }
+
+    private void logEnqueueDetails(String taskId, String testTool, String testFileName, String testFileContent,
+                                   String command, TestTaskMessage.MetricsConfig metricsConfig) {
         log.info("=== Enqueuing test task to Postgres queue ===");
         log.info("TaskId: {}", taskId);
         log.info("Tool: {}", testTool);
         log.info("FileName: {}", testFileName);
-        log.info("FileContent size: {} bytes (Base64: {} chars)", 
+        log.info("FileContent size: {} bytes (Base64: {} chars)",
                 testFileContent != null ? Base64.getDecoder().decode(testFileContent).length : 0,
                 testFileContent != null ? testFileContent.length() : 0);
         log.info("Command: {}", command != null ? command : "not specified");
-        
-        if (metricsConfig != null) {
-            log.info("MetricsConfig: CONFIGURED, delaySeconds={}, requests={}",
-                    metricsConfig.getDelaySeconds(),
-                    metricsConfig.getRequests() != null ? metricsConfig.getRequests().size() : 0);
-            if (metricsConfig.getRequests() != null) {
-                for (int i = 0; i < metricsConfig.getRequests().size(); i++) {
-                    TestTaskMessage.MetricsConfig.MetricsRequest req = metricsConfig.getRequests().get(i);
-                    log.info("  Request[{}]: name={}, method={}, url={}", i, req.getName(), req.getMethod(), req.getUrl());
-                }
-            }
-        } else {
-            log.info("MetricsConfig: NOT CONFIGURED");
-        }
+        logMetricsConfig(metricsConfig);
         log.info("=====================================");
+    }
 
-        OffsetDateTime now = OffsetDateTime.now();
-        UUID taskUuid = UUID.fromString(taskId);
+    private void logMetricsConfig(TestTaskMessage.MetricsConfig metricsConfig) {
+        if (metricsConfig == null) {
+            log.info("MetricsConfig: NOT CONFIGURED");
+            return;
+        }
+        log.info("MetricsConfig: CONFIGURED, delaySeconds={}, requests={}",
+                metricsConfig.delaySeconds(),
+                metricsConfig.requests() != null ? metricsConfig.requests().size() : 0);
+        if (metricsConfig.requests() == null) {
+            return;
+        }
+        for (int i = 0; i < metricsConfig.requests().size(); i++) {
+            TestTaskMessage.MetricsConfig.MetricsRequest req = metricsConfig.requests().get(i);
+            log.info("  Request[{}]: name={}, method={}, url={}", i, req.name(), req.method(), req.url());
+        }
+    }
 
-        UUID profileId = dockerExecutionProfileId != null ? dockerExecutionProfileId
-                : dockerExecutionProfileRepository
+    private UUID resolveDockerExecutionProfileId(UUID dockerExecutionProfileId) {
+        if (dockerExecutionProfileId != null) {
+            return dockerExecutionProfileId;
+        }
+        return dockerExecutionProfileRepository
                 .findFirstByNameAndEnabledTrue(DockerExecutionProfileService.DEFAULT_PROFILE_NAME)
-                .or(() -> dockerExecutionProfileRepository.findFirstByEnabledTrueOrderByCreatedAtAsc())
+                .or(dockerExecutionProfileRepository::findFirstByEnabledTrueOrderByCreatedAtAsc)
                 .map(DockerExecutionProfileEntity::getId)
                 .orElseThrow(() -> new IllegalStateException("No docker execution profile in database"));
-        
+    }
+
+    private void insertPendingTestTask(UUID taskUuid, String testTool, String testFileName, String testFileContent,
+                                       String command, Integer expectedDurationSeconds, String metricsConfigJson,
+                                       String summarizerName, UUID profileId) {
+        OffsetDateTime now = OffsetDateTime.now();
         String sql = """
             INSERT INTO test_task (
                 id, status, created_at, updated_at, locked_at, locked_by,
@@ -91,74 +141,83 @@ public class TestQueueService {
                 command, expected_duration_seconds, metrics_config, error_message, summarizer_name,
                 docker_execution_profile_id
             ) VALUES (
-                :id, :status, :createdAt, :updatedAt, NULL, NULL,
-                :testTool, :testFileName, :testFileContent,
-                :command, :expectedDurationSeconds, CAST(:metricsConfig AS jsonb), NULL, :summarizerName,
-                :dockerProfileId
+                :%s, :%s, :%s, :%s, NULL, NULL,
+                :%s, :%s, :%s,
+                :%s, :%s, CAST(:%s AS jsonb), NULL, :%s,
+                :%s
             )
-            """;
-        
-        entityManager.createNativeQuery(sql)
-                .setParameter("id", taskUuid)
-                .setParameter("status", TestTaskStatus.PENDING.name())
-                .setParameter("createdAt", now)
-                .setParameter("updatedAt", now)
-                .setParameter("testTool", testTool)
-                .setParameter("testFileName", testFileName)
-                .setParameter("testFileContent", testFileContent)
-                .setParameter("command", command != null ? command : "")
-                .setParameter("expectedDurationSeconds", expectedDurationSeconds)
-                .setParameter("metricsConfig", 
-                        metricsConfigJson != null && !metricsConfigJson.trim().isEmpty() 
-                                ? metricsConfigJson : null)
-                .setParameter("summarizerName", summarizerName)
-                .setParameter("dockerProfileId", profileId)
-                .executeUpdate();
-        
-        log.info("✓ Test task {} successfully saved to PostgreSQL (table test_task). Status=PENDING", taskId);
+            """.formatted(
+                NativeQueryParams.ID,
+                NativeQueryParams.STATUS,
+                NativeQueryParams.CREATED_AT,
+                NativeQueryParams.UPDATED_AT,
+                NativeQueryParams.TEST_TOOL,
+                NativeQueryParams.TEST_FILE_NAME,
+                NativeQueryParams.TEST_FILE_CONTENT,
+                NativeQueryParams.COMMAND,
+                NativeQueryParams.EXPECTED_DURATION_SECONDS,
+                NativeQueryParams.METRICS_CONFIG,
+                NativeQueryParams.SUMMARIZER_NAME,
+                NativeQueryParams.DOCKER_PROFILE_ID);
 
-        TestTaskEvent event = TestTaskEvent.builder().taskId(taskId).build();
-        TransactionSynchronizationManager.registerSynchronization(
-                new TransactionSynchronization() {
-                    @Override
-                    public void afterCommit() {
-                        try {
-                            if (queuePauseService.isQueuePaused()) {
-                                queuePauseService.recordPendingKafkaDispatch(taskUuid);
-                                log.info("Queue paused: task {} saved for Kafka dispatch after unpause", taskId);
-                            } else {
-                                kafkaOutboxService.sendTestTaskEvent(taskId, event);
-                                log.info("✓ Test task event queued for Kafka topic '{}': taskId={}", testTasksTopic, taskId);
-                            }
-                        } catch (Exception e) {
-                            log.error("Failed to queue test task event for Kafka/outbox task {}", taskId, e);
-                        }
-                    }
-                });
-        
-        return taskId;
+        Query query = entityManager.createNativeQuery(sql);
+        query.setParameter(NativeQueryParams.ID, taskUuid);
+        query.setParameter(NativeQueryParams.STATUS, TestTaskStatus.PENDING.name());
+        query.setParameter(NativeQueryParams.CREATED_AT, now);
+        query.setParameter(NativeQueryParams.UPDATED_AT, now);
+        query.setParameter(NativeQueryParams.TEST_TOOL, testTool);
+        query.setParameter(NativeQueryParams.TEST_FILE_NAME, testFileName);
+        query.setParameter(NativeQueryParams.TEST_FILE_CONTENT, testFileContent);
+        query.setParameter(NativeQueryParams.COMMAND, command != null ? command : "");
+        query.setParameter(NativeQueryParams.EXPECTED_DURATION_SECONDS, expectedDurationSeconds);
+        query.setParameter(NativeQueryParams.METRICS_CONFIG, normalizedMetricsConfigJson(metricsConfigJson));
+        query.setParameter(NativeQueryParams.SUMMARIZER_NAME, summarizerName);
+        query.setParameter(NativeQueryParams.DOCKER_PROFILE_ID, profileId);
+        query.executeUpdate();
+
+        log.info("✓ Test task {} successfully saved to PostgreSQL (table test_task). Status=PENDING", taskUuid);
     }
 
-    @Transactional
-    public String rerunFromHistory(UUID fromHistoryTaskId, String summarizerOverride) {
-        TestTaskHistoryEntity history = historyRepository.findById(fromHistoryTaskId)
-                .orElseThrow(() -> new IllegalArgumentException("History record not found: " + fromHistoryTaskId));
-        Integer expectedDuration = history.getExpectedDurationSeconds() != null
-                ? history.getExpectedDurationSeconds() : 60;
-        String summarizer = (summarizerOverride != null && !summarizerOverride.isBlank())
-                ? summarizerOverride.trim()
-                : history.getSummarizerName();
-        return enqueueTest(
-                history.getTestTool(),
-                history.getTestFileName(),
-                history.getTestFileContentBase64(),
-                history.getCommand(),
-                expectedDuration,
-                null,
-                history.getMetricsConfig(),
-                summarizer,
-                history.getDockerExecutionProfileId()
-        );
+    private static String normalizedMetricsConfigJson(String metricsConfigJson) {
+        if (metricsConfigJson == null || metricsConfigJson.trim().isEmpty()) {
+            return null;
+        }
+        return metricsConfigJson;
+    }
+
+    private void registerTestTaskKafkaDispatchAfterCommit(String taskId, UUID taskUuid) {
+        TestTaskEvent event = new TestTaskEvent(taskId);
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                dispatchTestTaskEventAfterCommit(taskId, taskUuid, event);
+            }
+        });
+    }
+
+    private void dispatchTestTaskEventAfterCommit(String taskId, UUID taskUuid, TestTaskEvent event) {
+        try {
+            if (queuePauseService.isQueuePaused()) {
+                queuePauseService.recordPendingKafkaDispatch(taskUuid);
+                log.info("Queue paused: task {} saved for Kafka dispatch after unpause", taskId);
+            } else {
+                kafkaOutboxService.sendTestTaskEvent(taskId, event);
+                log.info("✓ Test task event queued for Kafka topic '{}': taskId={}", testTasksTopic, taskId);
+            }
+        } catch (RuntimeException e) {
+            log.error("Failed to queue test task event for Kafka/outbox task {}", taskId, e);
+        }
+    }
+
+    private static int resolveExpectedDurationSeconds(Integer expectedDurationSeconds) {
+        return expectedDurationSeconds != null ? expectedDurationSeconds : DEFAULT_EXPECTED_DURATION_SECONDS;
+    }
+
+    private static String resolveSummarizerForRerun(String summarizerOverride, String historySummarizer) {
+        if (summarizerOverride != null && !summarizerOverride.isBlank()) {
+            return summarizerOverride.trim();
+        }
+        return historySummarizer;
     }
 
     @Transactional
@@ -185,5 +244,3 @@ public class TestQueueService {
         return true;
     }
 }
-
-

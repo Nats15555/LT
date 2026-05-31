@@ -67,6 +67,6 @@ public class TestTaskEntity {
     private String summarizerName;
 
     @Column(name = "docker_execution_profile_id", nullable = false)
-    private java.util.UUID dockerExecutionProfileId;
+    private UUID dockerExecutionProfileId;
 }
 

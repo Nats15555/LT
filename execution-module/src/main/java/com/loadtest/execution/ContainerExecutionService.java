@@ -5,7 +5,7 @@ import com.loadtest.execution.dto.ExecutionResponse;
 import com.loadtest.execution.service.ArtifactCollectorService;
 import com.loadtest.execution.service.CommandFromDbService;
 import com.github.dockerjava.api.DockerClient;
-import com.github.dockerjava.api.command.CreateContainerResponse;
+import com.github.dockerjava.api.command.CreateContainerCmd;
 import com.github.dockerjava.api.command.InspectVolumeResponse;
 import com.github.dockerjava.api.command.PullImageResultCallback;
 import com.github.dockerjava.api.exception.NotFoundException;
@@ -19,23 +19,25 @@ import com.github.dockerjava.core.command.WaitContainerResultCallback;
 import com.github.dockerjava.core.DockerClientBuilder;
 import com.github.dockerjava.httpclient5.ApacheDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
+import com.loadtest.execution.util.ExecutionPlaceholderKeys;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
-import java.util.Objects;
-import java.util.Set;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -44,6 +46,7 @@ import java.util.concurrent.TimeUnit;
 
 import com.loadtest.execution.persistence.DockerExecutionProfileEntity;
 import com.loadtest.execution.persistence.DockerExecutionProfileRepository;
+import com.loadtest.execution.persistence.LoadTestToolEntity;
 
 @Slf4j
 @Service
@@ -73,8 +76,8 @@ public class ContainerExecutionService {
 
     private static volatile String dockerBuildFailureOsNameOverrideForTests;
 
-    static void setDockerBuildFailureOsNameOverrideForTests(String osNameOrNull) {
-        dockerBuildFailureOsNameOverrideForTests = osNameOrNull;
+    static void setDockerBuildFailureOsNameOverrideForTests() {
+        dockerBuildFailureOsNameOverrideForTests = "Linux";
     }
 
     static void clearDockerBuildFailureOsNameOverrideForTests() {
@@ -175,7 +178,7 @@ public class ContainerExecutionService {
         try { Objects.requireNonNull(client, "client");
             client.pingCmd().exec();
             log.info("DockerClient initialized via {} (httpclient5 transport)", dockerUri);
-        } catch (Exception pingException) {
+        } catch (RuntimeException pingException) {
             log.warn("DockerClient created but ping failed.", pingException);
         }
     }
@@ -202,12 +205,13 @@ public class ContainerExecutionService {
 
             pingDockerClientAfterBuild(client, dockerUri);
             return client;
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.error("Failed to initialize DockerClient.", e);
             if (shouldLogWindowsDockerDesktopHint(dockerBuildFailureOsNameForHint())) {
                 log.error("For Windows: enable 'Expose daemon on tcp://localhost:2375 without TLS' in Docker Desktop.");
             }
-            throw new RuntimeException("Failed to initialize DockerClient. Check Docker is running and DOCKER_HOST / profile URI.", e);
+            throw new ContainerExecutionException(
+                    "Failed to initialize DockerClient. Check Docker is running and DOCKER_HOST / profile URI.", e);
         }
     }
 
@@ -221,40 +225,64 @@ public class ContainerExecutionService {
 
     public ExecutionResponse executeTestWithAutoCleanup(ExecutionRequest request) {
         log.info("Starting test execution with tool: {}, file: {}",
-                request.getTestTool(), request.getTestFilePath());
+                request.testTool(), request.testFilePath());
+        Path testFilePath = validateExecutionRequest(request);
+        ContainerRunState run = new ContainerRunState();
+        try {
+            PreparedExecution prepared = prepareExecution(request, testFilePath, run);
+            run.containerId = createContainer(prepared);
+            startCreatedContainer(prepared, run.containerId);
+            checkContainerAfterStart(run, prepared);
+            long executionTime = waitForContainerExit(run.docker, run.containerId);
+            return finishSuccessfulExecution(request, prepared, run.containerId, executionTime);
+        } catch (RuntimeException e) {
+            if (shouldCleanupAfterRuntimeFailure(run.containerId, run.docker)) {
+                cleanupContainer(run.docker, run.containerId);
+            }
+            throw e;
+        }
+    }
 
-        if (request.getCommand() == null || request.getCommand().isBlank()) {
+    private Path validateExecutionRequest(ExecutionRequest request) {
+        if (request.command() == null || request.command().isBlank()) {
             throw new IllegalArgumentException("Command is required (from upload request).");
         }
-        if (request.getTestFilePath() == null || request.getTestFilePath().isBlank()) {
+        if (request.testFilePath() == null || request.testFilePath().isBlank()) {
             throw new IllegalArgumentException("Test file path is required");
         }
-        Path testFilePath = Paths.get(request.getTestFilePath());
+        Path testFilePath = Paths.get(request.testFilePath());
         if (!Files.exists(testFilePath)) {
             throw new IllegalArgumentException("Test file not found: " + testFilePath.toAbsolutePath());
         }
-        String toolName = request.getTestTool();
+        return testFilePath;
+    }
+
+    private LoadTestToolEntity resolveTool(String toolName) {
         if (toolName == null || toolName.isBlank()) {
             throw new IllegalArgumentException("Test tool is required");
         }
+        return commandFromDbService.getToolByName(toolName.toUpperCase())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Unknown or disabled test tool: " + toolName + ". Add it in load_test_tools."));
+    }
 
-        String containerId = null;
-        DockerClient docker = null;
-        try {
-        var toolOpt = commandFromDbService.getToolByName(toolName.toUpperCase());
-        if (toolOpt.isEmpty()) {
-            throw new IllegalArgumentException("Unknown or disabled test tool: " + toolName + ". Add it in load_test_tools.");
-        }
-        var tool = toolOpt.get();
-
-        if (request.getDockerExecutionProfileId() == null) {
+    private DockerExecutionProfileEntity resolveEnabledProfile(UUID profileId) {
+        if (profileId == null) {
             throw new IllegalArgumentException("dockerExecutionProfileId is required");
         }
-        DockerExecutionProfileEntity profile = dockerExecutionProfileRepository
-                .findByIdAndEnabledTrue(request.getDockerExecutionProfileId())
+        return dockerExecutionProfileRepository.findByIdAndEnabledTrue(profileId)
                 .orElseThrow(() -> new IllegalArgumentException(
-                        "Docker profile not found or disabled: " + request.getDockerExecutionProfileId()));
-        docker = dockerClientForUri(profile.getDockerHostUri());
+                        "Docker profile not found or disabled: " + profileId));
+    }
+
+    private PreparedExecution prepareExecution(
+            ExecutionRequest request,
+            Path testFilePath,
+            ContainerRunState run) {
+        LoadTestToolEntity tool = resolveTool(request.testTool());
+        DockerExecutionProfileEntity profile = resolveEnabledProfile(request.dockerExecutionProfileId());
+        DockerClient docker = dockerClientForUri(profile.getDockerHostUri());
+        run.docker = docker;
 
         var artifactPaths = commandFromDbService.resolveArtifactPaths();
         String reportsHostPath = ensureDir(artifactPaths.reportsPath());
@@ -262,33 +290,54 @@ public class ContainerExecutionService {
 
         String fileName = testFilePath.getFileName().toString();
         String testFileHostPath = testFilePath.getParent().toAbsolutePath().toString();
-        String containerName = buildContainerName(toolName.toLowerCase());
+        String containerName = buildContainerName(request.testTool().toLowerCase());
         String reportBaseName = containerName.replaceAll("[^a-zA-Z0-9_-]", "-");
 
         Map<String, String> placeholders = Map.of(
-                "fileName", fileName,
-                "reportBaseName", reportBaseName,
-                "metricsBaseName", reportBaseName,
-                "testFileHostPath", testFileHostPath,
-                "reportsHostPath", reportsHostPath,
-                "metricsHostPath", metricsHostPath
+                ExecutionPlaceholderKeys.FILE_NAME, fileName,
+                ExecutionPlaceholderKeys.REPORT_BASE_NAME, reportBaseName,
+                ExecutionPlaceholderKeys.METRICS_BASE_NAME, reportBaseName,
+                ExecutionPlaceholderKeys.TEST_FILE_HOST_PATH, testFileHostPath,
+                ExecutionPlaceholderKeys.REPORTS_HOST_PATH, reportsHostPath,
+                ExecutionPlaceholderKeys.METRICS_HOST_PATH, metricsHostPath
         );
 
-        List<String> cmd = commandFromDbService.buildCommand(request.getCommand(), placeholders);
+        List<String> cmd = commandFromDbService.buildCommand(request.command(), placeholders);
         if (cmd.isEmpty()) {
             throw new IllegalStateException("Command is empty after substitution. Check command in upload request.");
         }
 
+        List<Bind> binds = resolveContainerBinds(docker, profile, placeholders);
+        HostConfig hostConfig = commandFromDbService.applyDockerProfile(
+                HostConfig.newHostConfig().withBinds(binds), profile);
+
+        return new PreparedExecution(
+                docker,
+                tool,
+                profile,
+                containerName,
+                reportsHostPath,
+                metricsHostPath,
+                placeholders,
+                cmd,
+                hostConfig,
+                parseProfileEnvironmentVariables(profile));
+    }
+
+    private List<Bind> resolveContainerBinds(
+            DockerClient docker,
+            DockerExecutionProfileEntity profile,
+            Map<String, String> placeholders) {
+        Optional<String> namedVolOpt = commandFromDbService.resolveNamedVolumeForChildBinds(profile);
         List<Bind> binds;
-        var namedVolOpt = commandFromDbService.resolveNamedVolumeForChildBinds(profile);
         if (namedVolOpt.isPresent()) {
             try {
                 InspectVolumeResponse vol = docker.inspectVolumeCmd(namedVolOpt.get()).exec();
                 String mountpoint = vol.getMountpoint();
                 log.info("Child tool container binds: volume '{}' → daemon mountpoint {}", namedVolOpt.get(), mountpoint);
-                binds = commandFromDbService.buildBindsUsingHostPaths(placeholders, java.util.Optional.of(mountpoint));
-            } catch (Exception e) {
-                throw new RuntimeException(
+                binds = commandFromDbService.buildBindsUsingHostPaths(placeholders, Optional.of(mountpoint));
+            } catch (RuntimeException e) {
+                throw new ContainerExecutionException(
                         "Cannot inspect Docker volume '" + namedVolOpt.get()
                                 + "' for child container binds (create the volume in compose or unset LOADTEST_EXECUTION_NAMED_VOLUME_FOR_CHILD_BINDS).",
                         e);
@@ -299,154 +348,204 @@ public class ContainerExecutionService {
         if (binds.isEmpty()) {
             throw new IllegalStateException("No mounts: testFileHostPath, reportsHostPath or metricsHostPath are missing.");
         }
+        return binds;
+    }
 
-        HostConfig hostConfig = commandFromDbService.applyDockerProfile(
-                HostConfig.newHostConfig().withBinds(binds), profile);
-
+    private static List<String> parseProfileEnvironmentVariables(DockerExecutionProfileEntity profile) {
         List<String> envVars = new ArrayList<>();
-        if (shouldParseProfileEnvironmentVariables(profile.getEnvironmentVariables())) {
-            try {
-                com.fasterxml.jackson.databind.JsonNode env = new com.fasterxml.jackson.databind.ObjectMapper()
-                        .readTree(profile.getEnvironmentVariables());
-                env.fields().forEachRemaining(e -> envVars.add(e.getKey() + "=" + e.getValue().asText()));
-            } catch (Exception e) {
-                log.debug("Skip env from docker profile: {}", e.getMessage());
-            }
+        if (!shouldParseProfileEnvironmentVariables(profile.getEnvironmentVariables())) {
+            return envVars;
         }
-
-        ensureImageExists(tool.getDockerImage(), docker);
-
-        var createContainerCmd = docker.createContainerCmd(tool.getDockerImage())
-                .withName(containerName)
-                .withEntrypoint()
-                .withCmd(cmd.toArray(new String[0]))
-                .withWorkingDir("/mnt/test")
-                .withHostConfig(hostConfig);
-        if (!envVars.isEmpty()) {
-            createContainerCmd.withEnv(envVars.toArray(new String[0]));
-        }
-        CreateContainerResponse container = createContainerCmd.exec();
-        final String createdContainerId = container.getId();
-        containerId = createdContainerId;
-
-        log.info("Собранная команда CLI: [{}]", String.join(" ", cmd));
-        docker.startContainerCmd(containerId).exec();
-        log.info("Started container {} (tool={})", containerName, toolName);
-
         try {
-            afterContainerStartPause();
-            InspectContainerResponse containerInfo = docker.inspectContainerCmd(containerId).exec();
-            String status = containerInfo.getState().getStatus();
-            log.info("Container {} status after start: {}", containerName, status);
-            if ("exited".equals(status)) {
-                Integer exitCode = containerInfo.getState().getExitCode();
-                log.error("Container {} exited immediately with exit code: {}", containerName, exitCode);
-                afterImmediateExitLogDelay();
-                String errorDetails = logContainerLogs(docker, containerId, containerName);
-                if (immediateExitHasTraceback(errorDetails)) {
-                    throw new RuntimeException(String.format(
-                            "Container exited with code %d (см. построчный traceback в логах ERROR выше). "
-                                    + "Locust: проверьте -f /mnt/test/{fileName}, --host (имя цели в сети Docker, напр. test-app-1 при поднятых test-apps), синтаксис Python.",
-                            exitCode));
-                }
-                throw new RuntimeException(String.format(
-                        "Container exited with code %d. Check test file and command. Logs: %s",
-                        exitCode, immediateExitLogAppendix(errorDetails)));
+            com.fasterxml.jackson.databind.JsonNode env = new com.fasterxml.jackson.databind.ObjectMapper()
+                    .readTree(profile.getEnvironmentVariables());
+            env.fields().forEachRemaining(e -> envVars.add(e.getKey() + "=" + e.getValue().asText()));
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            log.debug("Skip env from docker profile: {}", e.getMessage());
+        }
+        return envVars;
+    }
+
+    private String createContainer(PreparedExecution prepared) {
+        ensureImageExists(prepared.tool().getDockerImage(), prepared.docker());
+        try (CreateContainerCmd createContainerCmd = prepared.docker().createContainerCmd(prepared.tool().getDockerImage())
+                .withName(prepared.containerName())
+                .withEntrypoint()
+                .withCmd(prepared.cmd().toArray(new String[0]))
+                .withWorkingDir("/mnt/test")
+                .withHostConfig(prepared.hostConfig())) {
+            if (!prepared.envVars().isEmpty()) {
+                createContainerCmd.withEnv(prepared.envVars().toArray(new String[0]));
             }
+            return createContainerCmd.exec().getId();
+        }
+    }
+
+    private void startCreatedContainer(PreparedExecution prepared, String containerId) {
+        log.info("Собранная команда CLI: [{}]", String.join(" ", prepared.cmd()));
+        prepared.docker().startContainerCmd(containerId).exec();
+        log.info("Started container {} (tool={})", prepared.containerName(), prepared.tool().getName());
+    }
+
+    private void checkContainerAfterStart(ContainerRunState run, PreparedExecution prepared) {
+        try {
+            verifyContainerDidNotExitImmediately(run.docker, run.containerId, prepared.containerName());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            cleanupContainer(docker, containerId);
-            throw new RuntimeException("Test execution was interrupted", e);
-        } catch (RuntimeException e) {
-            throw e;
-        } catch (Exception e) {
-            log.warn("Failed to check container status: {}", e.getMessage());
+            cleanupContainer(run.docker, run.containerId);
+            throw new ContainerExecutionException("Test execution was interrupted", e);
         }
+    }
 
+    private void verifyContainerDidNotExitImmediately(DockerClient docker, String containerId, String containerName)
+            throws InterruptedException {
+        afterContainerStartPause();
+        InspectContainerResponse containerInfo = inspectContainerAfterStart(docker, containerId);
+        if (containerInfo == null) {
+            return;
+        }
+        String status = containerInfo.getState().getStatus();
+        log.info("Container {} status after start: {}", containerName, status);
+        if (!"exited".equals(status)) {
+            return;
+        }
+        Integer exitCode = containerInfo.getState().getExitCode();
+        log.error("Container {} exited immediately with exit code: {}", containerName, exitCode);
+        afterImmediateExitLogDelay();
+        String errorDetails = logContainerLogs(docker, containerId, containerName);
+        throw immediateExitException(exitCode, errorDetails);
+    }
+
+    private InspectContainerResponse inspectContainerAfterStart(DockerClient docker, String containerId) {
+        try {
+            return docker.inspectContainerCmd(containerId).exec();
+        } catch (RuntimeException e) {
+            log.warn("Failed to inspect container after start (continuing): {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private static ContainerExecutionException immediateExitException(Integer exitCode, String errorDetails) {
+        if (immediateExitHasTraceback(errorDetails)) {
+            return new ContainerExecutionException(String.format(
+                    "Container exited with code %d (см. построчный traceback в логах ERROR выше). "
+                            + "Locust: проверьте -f /mnt/test/{fileName}, --host (имя цели в сети Docker, напр. test-app-1 при поднятых test-apps), синтаксис Python.",
+                    exitCode));
+        }
+        return new ContainerExecutionException(String.format(
+                "Container exited with code %d. Check test file and command. Logs: %s",
+                exitCode, immediateExitLogAppendix(errorDetails)));
+    }
+
+    private long waitForContainerExit(DockerClient docker, String containerId) {
         long startTime = System.currentTimeMillis();
         log.info("Waiting for container to exit (test decides duration, e.g. Locust --run-time). Reports will be collected after exit.");
         WaitContainerResultCallback callback = new WaitContainerResultCallback();
         ExecutorService executor = Executors.newSingleThreadExecutor();
-        final DockerClient dockerForWait = docker;
-        executor.submit(() -> dockerForWait.waitContainerCmd(createdContainerId).exec(callback));
+        executor.submit(() -> docker.waitContainerCmd(containerId).exec(callback));
         try {
             Integer exitCode = callback.awaitStatusCode();
             log.info("Container {} exited with code {}", containerId, exitCode);
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.warn("Wait for container failed: {}", e.getMessage());
         } finally {
             executor.shutdown();
         }
-
         long executionTime = (System.currentTimeMillis() - startTime) / 1000;
         log.info("Test completed, execution time: {} seconds", executionTime);
+        return executionTime;
+    }
 
-        String resolvedContainerName = containerName;
+    private ExecutionResponse finishSuccessfulExecution(
+            ExecutionRequest request,
+            PreparedExecution prepared,
+            String containerId,
+            long executionTime) {
+        String resolvedContainerName = resolveContainerDisplayName(prepared.docker(), containerId, prepared.containerName());
+        String artifactBaseName = resolvedContainerName.replaceAll("[^a-zA-Z0-9_-]", "-");
+        collectArtifactsQuietly(request, prepared.reportsHostPath(), prepared.metricsHostPath(), artifactBaseName);
+        stopAndRemoveContainerQuietly(prepared.docker(), containerId);
+        return new ExecutionResponse(
+                "success",
+                "Test completed successfully",
+                containerId,
+                resolvedContainerName,
+                artifactBaseName,
+                executionTime,
+                prepared.reportsHostPath(),
+                prepared.metricsHostPath());
+    }
+
+    private String resolveContainerDisplayName(DockerClient docker, String containerId, String fallbackName) {
         try {
             InspectContainerResponse info = docker.inspectContainerCmd(containerId).exec();
             String inspectName = info.getName();
-            if (hasNonEmptyInspectContainerName(inspectName)) {
-                resolvedContainerName = stripLeadingSlashFromInspectName(inspectName);
-            }
-            logContainerLogsForDebug(docker, containerId, resolvedContainerName);
-        } catch (Exception e) {
+            String resolved = hasNonEmptyInspectContainerName(inspectName)
+                    ? stripLeadingSlashFromInspectName(inspectName)
+                    : fallbackName;
+            logContainerLogsForDebug(docker, containerId, resolved);
+            return resolved;
+        } catch (RuntimeException e) {
             if (shouldUseContainerIdPrefixAsDisplayName(containerId)) {
-                resolvedContainerName = containerId.substring(0, 12);
+                return containerId.substring(0, 12);
             }
             log.debug("Failed to get container name/logs: {}", e.getMessage());
+            return fallbackName;
         }
-        String artifactBaseName = resolvedContainerName.replaceAll("[^a-zA-Z0-9_-]", "-");
+    }
 
-        if (shouldCollectArtifactsAfterRun(request.getTaskId(), request.getCommand())) {
-            try {
-                Map<String, String> artifactPlaceholders = Map.of(
-                        "reportBaseName", artifactBaseName,
-                        "metricsBaseName", artifactBaseName,
-                        "reportsHostPath", reportsHostPath,
-                        "metricsHostPath", metricsHostPath
-                );
-                artifactCollector.collectAndSaveArtifacts(request.getTaskId(), request.getCommand(), artifactPlaceholders);
-                log.info("Artifacts collected and saved for task {}", request.getTaskId());
-            } catch (Exception e) {
-                log.error("Failed to collect/save artifacts for task {}: {}", request.getTaskId(), e.getMessage(), e);
-            }
+    private void collectArtifactsQuietly(
+            ExecutionRequest request,
+            String reportsHostPath,
+            String metricsHostPath,
+            String artifactBaseName) {
+        if (!shouldCollectArtifactsAfterRun(request.taskId(), request.command())) {
+            return;
         }
+        try {
+            Map<String, String> artifactPlaceholders = Map.of(
+                    ExecutionPlaceholderKeys.REPORT_BASE_NAME, artifactBaseName,
+                    ExecutionPlaceholderKeys.METRICS_BASE_NAME, artifactBaseName,
+                    ExecutionPlaceholderKeys.REPORTS_HOST_PATH, reportsHostPath,
+                    ExecutionPlaceholderKeys.METRICS_HOST_PATH, metricsHostPath
+            );
+            artifactCollector.collectAndSaveArtifacts(request.taskId(), request.command(), artifactPlaceholders);
+            log.info("Artifacts collected and saved for task {}", request.taskId());
+        } catch (RuntimeException e) {
+            log.error("Failed to collect/save artifacts for task {}: {}", request.taskId(), e.getMessage(), e);
+        }
+    }
 
+    private void stopAndRemoveContainerQuietly(DockerClient docker, String containerId) {
         try {
             stopContainer(docker, containerId);
             log.info("Container {} stopped", containerId);
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.warn("Failed to stop container {}: {}", containerId, e.getMessage());
         }
         try {
             removeContainer(docker, containerId);
             log.info("Container {} removed", containerId);
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.warn("Failed to remove container {}: {}", containerId, e.getMessage());
         }
+    }
 
-        return ExecutionResponse.builder()
-                .status("success")
-                .message("Test completed successfully")
-                .containerId(containerId)
-                .containerName(resolvedContainerName)
-                .artifactBaseName(artifactBaseName)
-                .executionTime(executionTime)
-                .reportsHostPath(reportsHostPath)
-                .metricsHostPath(metricsHostPath)
-                .build();
-        } catch (RuntimeException e) {
-            if (shouldCleanupAfterRuntimeFailure(containerId, docker)) {
-                cleanupContainer(docker, containerId);
-            }
-            throw e;
-        } catch (Exception e) {
-            if (shouldCleanupAfterRuntimeFailure(containerId, docker)) {
-                cleanupContainer(docker, containerId);
-            }
-            log.error("Error during test execution", e);
-            throw new RuntimeException("Failed to execute test: " + e.getMessage(), e);
-        }
+    private record PreparedExecution(
+            DockerClient docker,
+            LoadTestToolEntity tool,
+            DockerExecutionProfileEntity profile,
+            String containerName,
+            String reportsHostPath,
+            String metricsHostPath,
+            Map<String, String> placeholders,
+            List<String> cmd,
+            HostConfig hostConfig,
+            List<String> envVars) {}
+
+    private static final class ContainerRunState {
+        DockerClient docker;
+        String containerId;
     }
 
     private String ensureDir(String pathStr) { Path path = Paths.get(pathStr);
@@ -455,7 +554,7 @@ public class ContainerExecutionService {
                 log.debug("Created directory: {}", path.toAbsolutePath());
             }
             trySetWorldWritableDir(path);
-        } catch (Exception e) {
+        } catch (IOException e) {
             log.warn("Failed to create directory {}: {}", path, e.getMessage());
         }
         return path.toAbsolutePath().toString();
@@ -467,7 +566,7 @@ public class ContainerExecutionService {
             Files.setPosixFilePermissions(dir, perms);
         } catch (UnsupportedOperationException e) {
             log.debug("POSIX chmod skipped for {} (e.g. Windows host)", dir);
-        } catch (Exception e) {
+        } catch (IOException e) {
             log.warn("Could not set permissions on {}: {}", dir, e.getMessage());
         }
     }
@@ -475,25 +574,36 @@ public class ContainerExecutionService {
     private void ensureImageExists(String imageName, DockerClient docker) {
         Objects.requireNonNull(docker, "docker");
         try {
-            try {
-                docker.inspectImageCmd(imageName).exec();
-                log.debug("Image {} already exists locally", imageName);
-                return;
-            } catch (NotFoundException e) {
-                log.info("Image {} not found locally. Pulling from Docker Hub...", imageName);
+            if (!isImagePresentLocally(imageName, docker)) {
+                pullImageFromRegistry(imageName, docker);
             }
-
-            log.info("Pulling image {} from Docker Hub (this may take a while)...", imageName);
-            docker.pullImageCmd(imageName)
-                    .exec(new PullImageResultCallback())
-                    .awaitCompletion();
-            log.info("Image {} pulled successfully", imageName);
-            
-        } catch (Exception e) {
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ContainerExecutionException("Interrupted while pulling Docker image: " + imageName, e);
+        } catch (RuntimeException e) {
             log.error("Failed to ensure image {} exists", imageName, e);
-            throw new RuntimeException("Failed to pull Docker image: " + imageName + 
-                    ". Make sure Docker is running, you have internet connection, and the image name is correct.", e);
+            throw new ContainerExecutionException("Failed to pull Docker image: " + imageName
+                    + ". Make sure Docker is running, you have internet connection, and the image name is correct.", e);
         }
+    }
+
+    private boolean isImagePresentLocally(String imageName, DockerClient docker) {
+        try {
+            docker.inspectImageCmd(imageName).exec();
+            log.debug("Image {} already exists locally", imageName);
+            return true;
+        } catch (NotFoundException e) {
+            log.info("Image {} not found locally. Pulling from Docker Hub...", imageName);
+            return false;
+        }
+    }
+
+    private void pullImageFromRegistry(String imageName, DockerClient docker) throws InterruptedException {
+        log.info("Pulling image {} from Docker Hub (this may take a while)...", imageName);
+        docker.pullImageCmd(imageName)
+                .exec(new PullImageResultCallback())
+                .awaitCompletion();
+        log.info("Image {} pulled successfully", imageName);
     }
 
     private String buildContainerName(String toolPrefix) {
@@ -520,9 +630,9 @@ public class ContainerExecutionService {
             log.debug("Container {} is already stopped (NotModifiedException)", containerId);
         } catch (NotFoundException e) {
             log.debug("Container {} not found, may have been already removed", containerId);
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.error("Error stopping container {}", containerId, e);
-            throw new RuntimeException("Failed to stop container: " + e.getMessage(), e);
+            throw new ContainerExecutionException("Failed to stop container: " + e.getMessage(), e);
         }
     }
 
@@ -532,22 +642,22 @@ public class ContainerExecutionService {
             log.info("Container {} removed", containerId);
         } catch (NotFoundException e) {
             log.debug("Container {} not found, may have been already removed", containerId);
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.error("Error removing container {}", containerId, e);
-            throw new RuntimeException("Failed to remove container: " + e.getMessage(), e);
+            throw new ContainerExecutionException("Failed to remove container: " + e.getMessage(), e);
         }
     }
 
     private void cleanupContainer(DockerClient docker, String containerId) {
         try {
             stopContainer(docker, containerId);
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.warn("Failed to stop container {} during cleanup: {}", containerId, e.getMessage());
         }
         
         try {
             removeContainer(docker, containerId);
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.warn("Failed to remove container {} during cleanup: {}", containerId, e.getMessage());
         }
     }
@@ -586,7 +696,11 @@ public class ContainerExecutionService {
             }
             log.info("=== End of container {} logs ===", containerName);
             return logOutput;
-        } catch (Exception e) {
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("Interrupted while retrieving logs for container {}", containerName);
+            return null;
+        } catch (RuntimeException e) {
             log.warn("Failed to retrieve logs for container {}: {}", containerName, e.getMessage());
             return null;
         }
@@ -616,9 +730,22 @@ public class ContainerExecutionService {
                 log.debug("No logs available for container {}", containerName);
             }
             log.debug("=== End of container {} execution logs (DEBUG) ===", containerName);
-        } catch (Exception e) {
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.debug("Interrupted while retrieving logs for container {}", containerName);
+        } catch (RuntimeException e) {
             log.debug("Failed to retrieve logs for container {}: {}", containerName, e.getMessage());
         }
     }
-    
+
+    public static class ContainerExecutionException extends RuntimeException {
+
+        public ContainerExecutionException(String message) {
+            super(message);
+        }
+
+        public ContainerExecutionException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
 }

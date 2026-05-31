@@ -2,6 +2,7 @@ package com.loadtest.execution.service;
 
 import com.loadtest.execution.persistence.TestArtifactEntity;
 import com.loadtest.execution.persistence.TestArtifactRepository;
+import com.loadtest.execution.util.ExecutionPlaceholderKeys;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -29,38 +30,73 @@ public class ArtifactCollectorService {
     private final CommandFromDbService commandFromDbService;
 
     public void collectAndSaveArtifacts(UUID taskId, String commandTemplate, Map<String, String> placeholders) {
-        if (taskId == null || placeholders == null) return;
+        if (shouldSkipArtifactCollection(taskId, commandTemplate, placeholders)) {
+            return;
+        }
+        ArtifactHostPaths hostPaths = artifactHostPaths(placeholders);
+        List<ArtifactFile> files = resolveArtifactFiles(commandTemplate, placeholders, hostPaths);
+        if (files.isEmpty()) {
+            failNoArtifactPaths(taskId);
+        }
+        ArtifactSaveCounts counts = persistArtifactFiles(taskId, files);
+        deleteRemainingFilesByPrefix(hostPaths.reportsHostPath(), hostPaths.reportBase());
+        deleteRemainingFilesByPrefix(hostPaths.metricsHostPath(), hostPaths.metricsBase());
+        log.info("Artifact collection finished (taskId={}): saved={} missing={}",
+                taskId, counts.saved(), counts.missing());
+    }
+
+    private boolean shouldSkipArtifactCollection(UUID taskId, String commandTemplate, Map<String, String> placeholders) {
+        if (taskId == null || placeholders == null) {
+            return true;
+        }
         if (commandTemplate == null || commandTemplate.isBlank()) {
             log.info("Артефакты не собирались (taskId={}): команда пуста", taskId);
-            return;
+            return true;
         }
-        boolean hasPlaceholders = commandTemplate.contains("{reportBaseName}") || commandTemplate.contains("{metricsBaseName}");
-        if (!hasPlaceholders) {
+        if (!commandContainsArtifactPlaceholders(commandTemplate)) {
             log.info("Артефакты не собирались (taskId={}): в команде нет {reportBaseName} или {metricsBaseName}", taskId);
-            return;
+            return true;
         }
+        return false;
+    }
 
+    private static boolean commandContainsArtifactPlaceholders(String commandTemplate) {
+        return commandTemplate.contains("{reportBaseName}") || commandTemplate.contains("{metricsBaseName}");
+    }
+
+    private static ArtifactHostPaths artifactHostPaths(Map<String, String> placeholders) {
+        String reportBase = placeholders.getOrDefault(ExecutionPlaceholderKeys.REPORT_BASE_NAME, "");
+        return new ArtifactHostPaths(
+                placeholders.getOrDefault(ExecutionPlaceholderKeys.REPORTS_HOST_PATH, "").trim(),
+                placeholders.getOrDefault(ExecutionPlaceholderKeys.METRICS_HOST_PATH, "").trim(),
+                reportBase,
+                placeholders.getOrDefault(ExecutionPlaceholderKeys.METRICS_BASE_NAME, reportBase));
+    }
+
+    private List<ArtifactFile> resolveArtifactFiles(
+            String commandTemplate,
+            Map<String, String> placeholders,
+            ArtifactHostPaths hostPaths) {
         List<String> fromCommand = commandFromDbService.deriveArtifactFilePathsFromCommand(commandTemplate, placeholders);
-        String reportsHostPath = placeholders.getOrDefault("reportsHostPath", "").trim();
-        String metricsHostPath = placeholders.getOrDefault("metricsHostPath", "").trim();
-        String reportBase = placeholders.getOrDefault("reportBaseName", "");
-        String metricsBase = placeholders.getOrDefault("metricsBaseName", reportBase);
-
         Set<String> pathSet = new LinkedHashSet<>();
         for (String p : fromCommand) {
-            if (p != null && !p.isBlank()) pathSet.add(Paths.get(p).toAbsolutePath().normalize().toString());
+            if (p != null && !p.isBlank()) {
+                pathSet.add(Paths.get(p).toAbsolutePath().normalize().toString());
+            }
         }
-        addFilesByPrefix(pathSet, reportsHostPath, reportBase);
-        addFilesByPrefix(pathSet, metricsHostPath, metricsBase);
+        addFilesByPrefix(pathSet, hostPaths.reportsHostPath(), hostPaths.reportBase());
+        addFilesByPrefix(pathSet, hostPaths.metricsHostPath(), hostPaths.metricsBase());
+        return pathSet.stream().map(p -> new ArtifactFile(Paths.get(p))).toList();
+    }
 
-        List<ArtifactFile> files = pathSet.stream().map(p -> new ArtifactFile(Paths.get(p))).toList();
+    private static void failNoArtifactPaths(UUID taskId) {
+        String msg = "В команде указаны {reportBaseName} или {metricsBaseName}, но пути к файлам не получены. "
+                     + "Убедитесь, что в команде есть шаблоны вида {reportBaseName}.html или что в каталоге отчётов есть файлы с таким префиксом.";
+        log.warn("{} (taskId={})", msg, taskId);
+        throw new IllegalStateException(msg);
+    }
 
-        if (files.isEmpty()) {
-            String msg = "В команде указаны {reportBaseName} или {metricsBaseName}, но пути к файлам не получены. Убедитесь, что в команде есть шаблоны вида {reportBaseName}.html или что в каталоге отчётов есть файлы с таким префиксом.";
-            log.warn("{} (taskId={})", msg, taskId);
-            throw new IllegalStateException(msg);
-        }
-
+    private ArtifactSaveCounts persistArtifactFiles(UUID taskId, List<ArtifactFile> files) {
         int saved = 0;
         int missing = 0;
         for (ArtifactFile af : files) {
@@ -70,34 +106,32 @@ public class ArtifactCollectorService {
                     log.info("Artifact not found (taskId={}): {}", taskId, af.path().toAbsolutePath());
                     continue;
                 }
-                byte[] original = Files.readAllBytes(af.path());
-                byte[] gz = gzip(original);
-                TestArtifactEntity entity = TestArtifactEntity.builder()
-                        .id(UUID.randomUUID())
-                        .taskId(taskId)
-                        .fileName(af.path().getFileName().toString())
-                        .contentEncoding("gzip")
-                        .fileContent(gz)
-                        .originalSizeBytes((long) original.length)
-                        .compressedSizeBytes((long) gz.length)
-                        .createdAt(OffsetDateTime.now())
-                        .build();
-                artifactRepository.save(entity);
+                saveOneArtifact(taskId, af);
                 saved++;
-                log.info("Saved artifact (taskId={}): {} orig={}B gz={}B",
-                        taskId, entity.getFileName(), entity.getOriginalSizeBytes(), entity.getCompressedSizeBytes());
-                try {
-                    Files.delete(af.path());
-                } catch (IOException e) {
-                    log.warn("Could not delete local artifact file after save: {}", af.path().toAbsolutePath(), e);
-                }
-            } catch (Exception e) {
+            } catch (IOException | RuntimeException e) {
                 log.warn("Failed to save artifact (taskId={}): {}", taskId, af.path().toAbsolutePath(), e);
             }
         }
-        deleteRemainingFilesByPrefix(reportsHostPath, reportBase);
-        deleteRemainingFilesByPrefix(metricsHostPath, metricsBase);
-        log.info("Artifact collection finished (taskId={}): saved={} missing={}", taskId, saved, missing);
+        return new ArtifactSaveCounts(saved, missing);
+    }
+
+    private void saveOneArtifact(UUID taskId, ArtifactFile af) throws IOException {
+        byte[] original = Files.readAllBytes(af.path());
+        byte[] gz = gzip(original);
+        TestArtifactEntity entity = TestArtifactEntity.builder()
+                .id(UUID.randomUUID())
+                .taskId(taskId)
+                .fileName(af.path().getFileName().toString())
+                .contentEncoding("gzip")
+                .fileContent(gz)
+                .originalSizeBytes((long) original.length)
+                .compressedSizeBytes((long) gz.length)
+                .createdAt(OffsetDateTime.now())
+                .build();
+        artifactRepository.save(entity);
+        log.info("Saved artifact (taskId={}): {} orig={}B gz={}B",
+                taskId, entity.getFileName(), entity.getOriginalSizeBytes(), entity.getCompressedSizeBytes());
+        deleteLocalArtifactQuietly(af.path());
     }
 
     private static void deleteRemainingFilesByPrefix(String dirStr, String prefix) {
@@ -133,14 +167,30 @@ public class ArtifactCollectorService {
         }
     }
 
-    private static byte[] gzip(byte[] input) throws IOException {
-        if (input == null || input.length == 0) return new byte[0];
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        try (GZIPOutputStream gos = new GZIPOutputStream(baos)) {
-            gos.write(input);
+    private static void deleteLocalArtifactQuietly(Path path) {
+        try {
+            Files.delete(path);
+        } catch (IOException e) {
+            log.warn("Could not delete local artifact file after save: {}", path.toAbsolutePath(), e);
         }
-        return baos.toByteArray();
     }
 
-    private record ArtifactFile(Path path) {}
+    private static byte[] gzip(byte[] input) throws IOException {
+        if (input == null || input.length == 0) return new byte[0];
+        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+        try (GZIPOutputStream gos = new GZIPOutputStream(byteArrayOutputStream)) {
+            gos.write(input);
+        }
+        return byteArrayOutputStream.toByteArray();
+    }
+
+    private record ArtifactFile(Path path) {
+    }
+
+    private record ArtifactHostPaths(String reportsHostPath, String metricsHostPath, String reportBase,
+                                     String metricsBase) {
+    }
+
+    private record ArtifactSaveCounts(int saved, int missing) {
+    }
 }

@@ -117,7 +117,7 @@ class DockerExecutionProfileServiceTest {
                 .updatedAt(OffsetDateTime.MIN)
                 .build();
         when(repository.findAllByOrderByNameAsc()).thenReturn(List.of(row));
-        assertThat(service.listProfiles()).singleElement().satisfies(d -> assertThat(d.getName()).isEqualTo("p1"));
+        assertThat(service.listProfiles()).singleElement().satisfies(d -> assertThat(d.name()).isEqualTo("p1"));
     }
 
     @Test
@@ -147,7 +147,7 @@ class DockerExecutionProfileServiceTest {
                         .createdAt(OffsetDateTime.MIN)
                         .updatedAt(OffsetDateTime.MIN)
                         .build()));
-        assertThat(service.getById(id).getId()).isEqualTo(id);
+        assertThat(service.getById(id).id()).isEqualTo(id);
     }
 
     @Test
@@ -162,7 +162,7 @@ class DockerExecutionProfileServiceTest {
     void create_rejectsWhenQueueNotPausedAndTasksExist() {
         when(queuePauseService.isQueuePaused()).thenReturn(false);
         when(testTaskRepository.count()).thenReturn(1L);
-        CreateDockerProfileRequest req = CreateDockerProfileRequest.builder().name("n").build();
+        CreateDockerProfileRequest req = new CreateDockerProfileRequest("n", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
         assertThatThrownBy(() -> service.create(req)).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("очереди");
         verify(repository, never()).save(any());
@@ -174,11 +174,8 @@ class DockerExecutionProfileServiceTest {
         when(repository.existsByName("new")).thenReturn(false);
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        CreateDockerProfileRequest req = CreateDockerProfileRequest.builder()
-                .name("  new  ")
-                .enabled(true)
-                .build();
-        assertThat(service.create(req).getName()).isEqualTo("new");
+        CreateDockerProfileRequest req = new CreateDockerProfileRequest("  new  ", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, true);
+        assertThat(service.create(req).name()).isEqualTo("new");
         ArgumentCaptor<DockerExecutionProfileEntity> cap = ArgumentCaptor.forClass(DockerExecutionProfileEntity.class);
         verify(repository).save(cap.capture());
         assertThat(cap.getValue().getMaxConcurrentContainers()).isGreaterThanOrEqualTo(1);
@@ -190,27 +187,24 @@ class DockerExecutionProfileServiceTest {
         when(repository.existsByName("new")).thenReturn(false);
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        CreateDockerProfileRequest req = CreateDockerProfileRequest.builder()
-                .name("new")
-                .enabled(true)
-                .build();
+        CreateDockerProfileRequest req = new CreateDockerProfileRequest("new", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, true);
         var dto = service.create(req);
-        assertThat(dto.getMemoryLimitMb()).isEqualTo(512);
-        assertThat(dto.getMemoryReservationMb()).isEqualTo(256);
-        assertThat(dto.getCpuLimit()).isEqualByComparingTo("0.5");
-        assertThat(dto.getCpuShares()).isEqualTo(512);
-        assertThat(dto.getMaxConcurrentContainers()).isEqualTo(1);
-        assertThat(dto.getNetworkMode()).isEqualTo("loadtest_loadtest-network");
-        assertThat(dto.getRestartPolicy()).isEqualTo("no");
-        assertThat(dto.getLogDriver()).isEqualTo("json-file");
-        assertThat(dto.getLogMaxSize()).isEqualTo("10m");
-        assertThat(dto.getLogMaxFiles()).isEqualTo(3);
+        assertThat(dto.memoryLimitMb()).isEqualTo(512);
+        assertThat(dto.memoryReservationMb()).isEqualTo(256);
+        assertThat(dto.cpuLimit()).isEqualByComparingTo("0.5");
+        assertThat(dto.cpuShares()).isEqualTo(512);
+        assertThat(dto.maxConcurrentContainers()).isEqualTo(1);
+        assertThat(dto.networkMode()).isEqualTo("loadtest_loadtest-network");
+        assertThat(dto.restartPolicy()).isEqualTo("no");
+        assertThat(dto.logDriver()).isEqualTo("json-file");
+        assertThat(dto.logMaxSize()).isEqualTo("10m");
+        assertThat(dto.logMaxFiles()).isEqualTo(3);
     }
 
     @Test
     void create_rejectsBlankNameAfterTrim() {
         when(queuePauseService.isQueuePaused()).thenReturn(true);
-        assertThatThrownBy(() -> service.create(CreateDockerProfileRequest.builder().name("   ").build()))
+        assertThatThrownBy(() -> service.create(new CreateDockerProfileRequest("   ", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("name");
     }
@@ -221,14 +215,14 @@ class DockerExecutionProfileServiceTest {
         when(testTaskRepository.count()).thenReturn(0L);
         when(repository.existsByName("solo")).thenReturn(false);
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        assertThat(service.create(CreateDockerProfileRequest.builder().name("solo").build()).getName()).isEqualTo("solo");
+        assertThat(service.create(new CreateDockerProfileRequest("solo", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)).name()).isEqualTo("solo");
     }
 
     @Test
     void create_rejectsDuplicateName() {
         when(queuePauseService.isQueuePaused()).thenReturn(true);
         when(repository.existsByName("dup")).thenReturn(true);
-        assertThatThrownBy(() -> service.create(CreateDockerProfileRequest.builder().name("dup").build()))
+        assertThatThrownBy(() -> service.create(new CreateDockerProfileRequest("dup", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)))
                 .isInstanceOf(IllegalStateException.class);
     }
 
@@ -247,9 +241,9 @@ class DockerExecutionProfileServiceTest {
         when(repository.findById(id)).thenReturn(Optional.of(e));
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        UpdateDockerProfileRequest upd = new UpdateDockerProfileRequest();
-        upd.setMemoryLimitMb(999);
-        assertThat(service.update(id, upd).getMemoryLimitMb()).isEqualTo(999);
+        UpdateDockerProfileRequest upd = new UpdateDockerProfileRequest(
+                null, null, null, 999, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        assertThat(service.update(id, upd).memoryLimitMb()).isEqualTo(999);
     }
 
     @Test
@@ -298,9 +292,9 @@ class DockerExecutionProfileServiceTest {
                 .build();
         when(repository.findById(id)).thenReturn(Optional.of(e));
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        UpdateDockerProfileRequest upd = new UpdateDockerProfileRequest();
-        upd.setMaxConcurrentContainers(0);
-        assertThat(service.update(id, upd).getMaxConcurrentContainers()).isEqualTo(1);
+        UpdateDockerProfileRequest upd = new UpdateDockerProfileRequest(
+                null, null, null, null, null, null, null, 0, null, null, null, null, null, null, null, null, null);
+        assertThat(service.update(id, upd).maxConcurrentContainers()).isEqualTo(1);
     }
 
     @Test
@@ -308,7 +302,7 @@ class DockerExecutionProfileServiceTest {
         when(queuePauseService.isQueuePaused()).thenReturn(true);
         UUID id = UUID.randomUUID();
         when(repository.findById(id)).thenReturn(Optional.empty());
-        assertThatThrownBy(() -> service.update(id, new UpdateDockerProfileRequest()))
+        assertThatThrownBy(() -> service.update(id, new UpdateDockerProfileRequest(null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Profile not found");
     }
@@ -328,8 +322,8 @@ class DockerExecutionProfileServiceTest {
         when(repository.findById(id)).thenReturn(Optional.of(
                 DockerExecutionProfileEntity.builder().id(id).name("a").build()));
         when(repository.existsByName("b")).thenReturn(true);
-        UpdateDockerProfileRequest upd = new UpdateDockerProfileRequest();
-        upd.setName("b");
+        UpdateDockerProfileRequest upd = new UpdateDockerProfileRequest(
+                "b", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
         assertThatThrownBy(() -> service.update(id, upd)).isInstanceOf(IllegalStateException.class);
     }
 
@@ -348,43 +342,28 @@ class DockerExecutionProfileServiceTest {
         when(repository.findById(id)).thenReturn(Optional.of(e));
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        UpdateDockerProfileRequest upd = new UpdateDockerProfileRequest();
-        upd.setName("new");
-        upd.setDockerHostUri(" tcp://x ");
-        upd.setNamedVolumeForChildBinds(" vol ");
-        upd.setMemoryLimitMb(512);
-        upd.setMemoryReservationMb(256);
-        upd.setCpuLimit(BigDecimal.valueOf(0.9));
-        upd.setCpuShares(1024);
-        upd.setMaxConcurrentContainers(3);
-        upd.setNetworkMode("host");
-        upd.setRestartPolicy("always");
-        upd.setRestartMaxRetries(4);
-        upd.setLogDriver("json-file");
-        upd.setLogMaxSize("20m");
-        upd.setLogMaxFiles(10);
-        upd.setEnvironmentVariables("{\"A\":\"B\"}");
-        upd.setLabels("{\"L\":\"1\"}");
-        upd.setEnabled(false);
+        UpdateDockerProfileRequest upd = new UpdateDockerProfileRequest(
+                "new", " tcp://x ", " vol ", 512, 256, BigDecimal.valueOf(0.9), 1024, 3,
+                "host", "always", 4, "json-file", "20m", 10, "{\"A\":\"B\"}", "{\"L\":\"1\"}", false);
 
         var dto = service.update(id, upd);
-        assertThat(dto.getName()).isEqualTo("new");
-        assertThat(dto.getDockerHostUri()).isEqualTo("tcp://x");
-        assertThat(dto.getNamedVolumeForChildBinds()).isEqualTo("vol");
-        assertThat(dto.getMemoryLimitMb()).isEqualTo(512);
-        assertThat(dto.getMemoryReservationMb()).isEqualTo(256);
-        assertThat(dto.getCpuLimit()).isEqualByComparingTo("0.9");
-        assertThat(dto.getCpuShares()).isEqualTo(1024);
-        assertThat(dto.getMaxConcurrentContainers()).isEqualTo(3);
-        assertThat(dto.getNetworkMode()).isEqualTo("host");
-        assertThat(dto.getRestartPolicy()).isEqualTo("always");
-        assertThat(dto.getRestartMaxRetries()).isEqualTo(4);
-        assertThat(dto.getLogDriver()).isEqualTo("json-file");
-        assertThat(dto.getLogMaxSize()).isEqualTo("20m");
-        assertThat(dto.getLogMaxFiles()).isEqualTo(10);
-        assertThat(dto.getEnvironmentVariables()).contains("A");
-        assertThat(dto.getLabels()).contains("L");
-        assertThat(dto.isEnabled()).isFalse();
+        assertThat(dto.name()).isEqualTo("new");
+        assertThat(dto.dockerHostUri()).isEqualTo("tcp://x");
+        assertThat(dto.namedVolumeForChildBinds()).isEqualTo("vol");
+        assertThat(dto.memoryLimitMb()).isEqualTo(512);
+        assertThat(dto.memoryReservationMb()).isEqualTo(256);
+        assertThat(dto.cpuLimit()).isEqualByComparingTo("0.9");
+        assertThat(dto.cpuShares()).isEqualTo(1024);
+        assertThat(dto.maxConcurrentContainers()).isEqualTo(3);
+        assertThat(dto.networkMode()).isEqualTo("host");
+        assertThat(dto.restartPolicy()).isEqualTo("always");
+        assertThat(dto.restartMaxRetries()).isEqualTo(4);
+        assertThat(dto.logDriver()).isEqualTo("json-file");
+        assertThat(dto.logMaxSize()).isEqualTo("20m");
+        assertThat(dto.logMaxFiles()).isEqualTo(10);
+        assertThat(dto.environmentVariables()).contains("A");
+        assertThat(dto.labels()).contains("L");
+        assertThat(dto.enabled()).isFalse();
     }
 
     @Test
@@ -404,15 +383,13 @@ class DockerExecutionProfileServiceTest {
         when(repository.findById(id)).thenReturn(Optional.of(e));
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        UpdateDockerProfileRequest upd = new UpdateDockerProfileRequest();
-        upd.setName(" same ");
-        upd.setDockerHostUri("   ");
-        upd.setNamedVolumeForChildBinds("   ");
+        UpdateDockerProfileRequest upd = new UpdateDockerProfileRequest(
+                " same ", "   ", "   ", null, null, null, null, null, null, null, null, null, null, null, null, null, null);
 
         var dto = service.update(id, upd);
-        assertThat(dto.getName()).isEqualTo("same");
-        assertThat(dto.getDockerHostUri()).isNull();
-        assertThat(dto.getNamedVolumeForChildBinds()).isNull();
+        assertThat(dto.name()).isEqualTo("same");
+        assertThat(dto.dockerHostUri()).isNull();
+        assertThat(dto.namedVolumeForChildBinds()).isNull();
     }
 
     @Test
@@ -420,11 +397,8 @@ class DockerExecutionProfileServiceTest {
         when(queuePauseService.isQueuePaused()).thenReturn(true);
         when(repository.existsByName("n")).thenReturn(false);
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        CreateDockerProfileRequest req = CreateDockerProfileRequest.builder()
-                .name("n")
-                .enabled(null)
-                .build();
-        assertThat(service.create(req).isEnabled()).isTrue();
+        CreateDockerProfileRequest req = new CreateDockerProfileRequest("n", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        assertThat(service.create(req).enabled()).isTrue();
     }
 
     @Test
@@ -440,33 +414,19 @@ class DockerExecutionProfileServiceTest {
         when(repository.existsByName("full")).thenReturn(false);
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        CreateDockerProfileRequest req = CreateDockerProfileRequest.builder()
-                .name("full")
-                .memoryLimitMb(2048)
-                .memoryReservationMb(1024)
-                .cpuLimit(new BigDecimal("1.5"))
-                .cpuShares(2048)
-                .maxConcurrentContainers(5)
-                .networkMode("host")
-                .restartPolicy("always")
-                .restartMaxRetries(9)
-                .logDriver("json-file")
-                .logMaxSize("100m")
-                .logMaxFiles(8)
-                .environmentVariables("{\"A\":\"1\"}")
-                .labels("{\"L\":\"x\"}")
-                .enabled(true)
-                .build();
+        CreateDockerProfileRequest req = new CreateDockerProfileRequest(
+                "full", null, null, 2048, 1024, new BigDecimal("1.5"), 2048, 5,
+                "host", "always", 9, "json-file", "100m", 8, "{\"A\":\"1\"}", "{\"L\":\"x\"}", true);
         var dto = service.create(req);
-        assertThat(dto.getMemoryLimitMb()).isEqualTo(2048);
-        assertThat(dto.getMemoryReservationMb()).isEqualTo(1024);
-        assertThat(dto.getCpuLimit()).isEqualByComparingTo("1.5");
-        assertThat(dto.getCpuShares()).isEqualTo(2048);
-        assertThat(dto.getMaxConcurrentContainers()).isEqualTo(5);
-        assertThat(dto.getNetworkMode()).isEqualTo("host");
-        assertThat(dto.getRestartPolicy()).isEqualTo("always");
-        assertThat(dto.getRestartMaxRetries()).isEqualTo(9);
-        assertThat(dto.getLogMaxSize()).isEqualTo("100m");
-        assertThat(dto.getLogMaxFiles()).isEqualTo(8);
+        assertThat(dto.memoryLimitMb()).isEqualTo(2048);
+        assertThat(dto.memoryReservationMb()).isEqualTo(1024);
+        assertThat(dto.cpuLimit()).isEqualByComparingTo("1.5");
+        assertThat(dto.cpuShares()).isEqualTo(2048);
+        assertThat(dto.maxConcurrentContainers()).isEqualTo(5);
+        assertThat(dto.networkMode()).isEqualTo("host");
+        assertThat(dto.restartPolicy()).isEqualTo("always");
+        assertThat(dto.restartMaxRetries()).isEqualTo(9);
+        assertThat(dto.logMaxSize()).isEqualTo("100m");
+        assertThat(dto.logMaxFiles()).isEqualTo(8);
     }
 }

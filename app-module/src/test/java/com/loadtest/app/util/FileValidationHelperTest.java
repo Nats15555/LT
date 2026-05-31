@@ -11,11 +11,6 @@ import static org.mockito.Mockito.when;
 class FileValidationHelperTest {
 
     @Test
-    void classInstantiable() {
-        assertThat(new FileValidationHelper()).isNotNull();
-    }
-
-    @Test
     void getFileExtension_handlesNullAndNoExtension() {
         assertThat(FileValidationHelper.getFileExtension(null)).isEmpty();
         assertThat(FileValidationHelper.getFileExtension("")).isEmpty();

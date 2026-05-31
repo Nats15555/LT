@@ -32,23 +32,21 @@ class LoadTestToolControllerDirectUnitTest {
     }
 
     private LoadTestToolDto dto() {
-        return LoadTestToolDto.builder()
-                .id(UUID.randomUUID())
-                .name("K6")
-                .dockerImage("k6")
-                .fileExtensions(List.of(".js"))
-                .enabled(true)
-                .createdAt(OffsetDateTime.MIN)
-                .updatedAt(OffsetDateTime.MIN)
-                .build();
+        return new LoadTestToolDto(
+                UUID.randomUUID(),
+                "K6",
+                "k6",
+                List.of(".js"),
+                true,
+                OffsetDateTime.MIN,
+                OffsetDateTime.MIN);
     }
 
     @Test
     void coverAllControllerBranchesDirectly() {
-        CreateLoadTestToolRequest create = CreateLoadTestToolRequest.builder()
-                .name("K6").dockerImage("k6").fileExtensions(List.of(".js")).enabled(true).build();
+        CreateLoadTestToolRequest create = new CreateLoadTestToolRequest("K6", "k6", List.of(".js"), true);
         doReturn(dto()).when(service).createTool(any());
-        ResponseEntity<?> cOk = controller.createTool(create);
+        ResponseEntity<Map<String, Object>> cOk = controller.createTool(create);
         assertThat(cOk.getStatusCode().value()).isEqualTo(201);
         reset(service);
         doThrow(new IllegalArgumentException("bad")).when(service).createTool(any());
@@ -82,7 +80,7 @@ class LoadTestToolControllerDirectUnitTest {
         doThrow(new RuntimeException("boom")).when(service).getToolByName("k6");
         assertThat(controller.getToolByName("k6").getStatusCode().value()).isEqualTo(500);
 
-        UpdateLoadTestToolRequest upd = new UpdateLoadTestToolRequest();
+        UpdateLoadTestToolRequest upd = new UpdateLoadTestToolRequest(null, null, null);
         reset(service);
         doReturn(dto()).when(service).updateTool(any(), any());
         assertThat(controller.updateTool(id, upd).getStatusCode().value()).isEqualTo(200);
@@ -97,4 +95,3 @@ class LoadTestToolControllerDirectUnitTest {
         assertThat(controller.deleteTool(id).getStatusCode().value()).isEqualTo(404);
     }
 }
-

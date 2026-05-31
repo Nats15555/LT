@@ -1,22 +1,27 @@
 package com.loadtest.metrics.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.loadtest.metrics.dto.SummarizationTaskEvent;
+import com.loadtest.metrics.persistence.KafkaOutboxEntity;
+import com.loadtest.metrics.persistence.KafkaOutboxRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import jakarta.annotation.PostConstruct;
-import java.sql.Timestamp;
-import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 @Slf4j
 @Service
@@ -27,8 +32,10 @@ public class KafkaOutboxService {
     private static final String EVENT_TYPE = "SUMMARIZATION_TASK_EVENT";
     private static final String STATUS_PENDING = "PENDING";
     private static final String STATUS_SENT = "SENT";
+    private static final String MSG_INTERRUPTED = "Interrupted while publishing to Kafka";
+    private static final String MSG_PUBLISH_FAILED = "Kafka publish failed";
 
-    private final JdbcTemplate jdbcTemplate;
+    private final KafkaOutboxRepository kafkaOutboxRepository;
     private final ObjectMapper objectMapper;
     private final KafkaTemplate<String, SummarizationTaskEvent> kafkaTemplate;
 
@@ -40,84 +47,82 @@ public class KafkaOutboxService {
     private int batchSize;
 
     @PostConstruct
-    public void ensureTable() {
-        jdbcTemplate.execute("""
-                CREATE TABLE IF NOT EXISTS kafka_outbox (
-                    id UUID PRIMARY KEY,
-                    module VARCHAR(32) NOT NULL,
-                    event_type VARCHAR(64) NOT NULL,
-                    topic VARCHAR(128) NOT NULL,
-                    event_key VARCHAR(128) NOT NULL,
-                    payload_json TEXT NOT NULL,
-                    status VARCHAR(16) NOT NULL DEFAULT 'PENDING',
-                    attempts INTEGER NOT NULL DEFAULT 0,
-                    last_error TEXT,
-                    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-                )
-                """);
-        jdbcTemplate.execute("""
-                CREATE INDEX IF NOT EXISTS idx_kafka_outbox_retry
-                ON kafka_outbox(module, status, next_attempt_at, created_at)
-                """);
+    public void ensureSchema() {
+        kafkaOutboxRepository.ensureTable();
+        kafkaOutboxRepository.ensureRetryIndex();
     }
 
     public void sendSummarizationEvent(String taskId, SummarizationTaskEvent event) {
         try {
-            kafkaTemplate.send(summarizationTasksTopic, taskId, event).get(15, TimeUnit.SECONDS);
-        } catch (Exception e) {
+            awaitSend(taskId, event);
+        } catch (KafkaOutboxPublishException e) {
             storePending(taskId, event, e);
         }
     }
 
-    private void storePending(String taskId, SummarizationTaskEvent event, Exception e) {
+    private void awaitSend(String taskId, SummarizationTaskEvent event) {
+        try {
+            kafkaTemplate.send(summarizationTasksTopic, taskId, event).get(15, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new KafkaOutboxPublishException(MSG_INTERRUPTED, e);
+        } catch (ExecutionException | TimeoutException e) {
+            throw new KafkaOutboxPublishException(MSG_PUBLISH_FAILED, e);
+        }
+    }
+
+    private void storePending(String taskId, SummarizationTaskEvent event, KafkaOutboxPublishException e) {
         String payloadJson;
         try {
             payloadJson = objectMapper.writeValueAsString(event);
-        } catch (Exception serEx) {
+        } catch (JsonProcessingException serEx) {
             payloadJson = "{\"error\":\"payload-serialization-failed\"}";
         }
-        jdbcTemplate.update("""
-                        INSERT INTO kafka_outbox(id, module, event_type, topic, event_key, payload_json, status, attempts, last_error, next_attempt_at, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, now(), now())
-                        """,
-                UUID.randomUUID(), MODULE, EVENT_TYPE, summarizationTasksTopic, taskId, payloadJson, STATUS_PENDING,
-                shrinkError(e), Timestamp.from(Instant.now().plusMillis(retryDelayMs)));
+        OffsetDateTime now = OffsetDateTime.now();
+        kafkaOutboxRepository.save(KafkaOutboxEntity.builder()
+                .id(UUID.randomUUID())
+                .module(MODULE)
+                .eventType(EVENT_TYPE)
+                .topic(summarizationTasksTopic)
+                .eventKey(taskId)
+                .payloadJson(payloadJson)
+                .status(STATUS_PENDING)
+                .attempts(1)
+                .lastError(shrinkError(e))
+                .nextAttemptAt(now.plus(retryDelayMs, ChronoUnit.MILLIS))
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
         log.warn("Kafka unavailable, outbox saved: module={}, eventType={}, key={}, reason={}",
                 MODULE, EVENT_TYPE, taskId, e.getMessage());
     }
 
     @Scheduled(fixedDelayString = "${loadtest.kafka-outbox.retry-delay-ms:5000}")
+    @Transactional
     public void flushPending() {
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
-                        SELECT id, event_key, payload_json
-                        FROM kafka_outbox
-                        WHERE module = ? AND status = ? AND event_type = ? AND next_attempt_at <= now()
-                        ORDER BY created_at
-                        LIMIT ?
-                        """,
-                MODULE, STATUS_PENDING, EVENT_TYPE, batchSize);
-        for (Map<String, Object> row : rows) {
-            UUID id = (UUID) row.get("id");
-            String key = (String) row.get("event_key");
+        List<KafkaOutboxEntity> rows = kafkaOutboxRepository
+                .findByModuleAndStatusAndEventTypeAndNextAttemptAtLessThanEqualOrderByCreatedAtAsc(
+                        MODULE, STATUS_PENDING, EVENT_TYPE, OffsetDateTime.now(), PageRequest.of(0, batchSize));
+        for (KafkaOutboxEntity row : rows) {
             try {
-                String payload = (String) row.get("payload_json");
-                SummarizationTaskEvent event = objectMapper.readValue(payload, SummarizationTaskEvent.class);
-                kafkaTemplate.send(summarizationTasksTopic, key, event).get(15, TimeUnit.SECONDS);
-                jdbcTemplate.update("UPDATE kafka_outbox SET status = ?, last_error = NULL, updated_at = now() WHERE id = ?",
-                        STATUS_SENT, id);
-            } catch (Exception e) {
-                jdbcTemplate.update("""
-                                UPDATE kafka_outbox
-                                SET attempts = attempts + 1,
-                                    last_error = ?,
-                                    next_attempt_at = ?,
-                                    updated_at = now()
-                                WHERE id = ?
-                                """,
-                        shrinkError(e), Timestamp.from(Instant.now().plusMillis(retryDelayMs)), id);
+                awaitSend(row.getEventKey(), readEvent(row.getPayloadJson()));
+                row.setStatus(STATUS_SENT);
+                row.setLastError(null);
+                row.setUpdatedAt(OffsetDateTime.now());
+            } catch (KafkaOutboxPublishException | IllegalStateException e) {
+                row.setAttempts(row.getAttempts() + 1);
+                row.setLastError(shrinkError(e));
+                row.setNextAttemptAt(OffsetDateTime.now().plus(retryDelayMs, ChronoUnit.MILLIS));
+                row.setUpdatedAt(OffsetDateTime.now());
             }
+        }
+    }
+
+    private SummarizationTaskEvent readEvent(String payload) {
+        try {
+            return objectMapper.readValue(payload, SummarizationTaskEvent.class);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Invalid outbox payload for SUMMARIZATION_TASK_EVENT", e);
         }
     }
 
@@ -126,4 +131,3 @@ public class KafkaOutboxService {
         return msg.length() > 2000 ? msg.substring(0, 2000) : msg;
     }
 }
-

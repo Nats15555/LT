@@ -131,7 +131,7 @@ public class ExternalLlmIngestController {
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
             log.info("callbackSummary: taskId={}, http={}, body={}", taskId, resp.statusCode(),
                     resp.body() != null && resp.body().length() > 200 ? resp.body().substring(0, 200) : resp.body());
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.warn("callbackSummary failed for taskId={}: {}", taskId, e.getMessage());
         }
     }

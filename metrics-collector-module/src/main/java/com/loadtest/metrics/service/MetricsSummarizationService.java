@@ -1,10 +1,10 @@
 package com.loadtest.metrics.service;
 
 import com.loadtest.metrics.dto.MetricsCollectionResponse;
+import com.loadtest.metrics.util.TestSummaryConstants;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.util.HashMap;
 import java.util.Map;
 
 @Slf4j
@@ -21,19 +21,15 @@ public class MetricsSummarizationService {
 
             log.info("Metrics summarization completed for taskId: {}", taskId);
 
-            return MetricsCollectionResponse.SummaryResult.builder()
-                    .status("SUCCESS")
-                    .summary(summary)
-                    .details(details)
-                    .build();
+            return new MetricsCollectionResponse.SummaryResult("SUCCESS", summary, details);
 
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             log.error("Error during metrics summarization for taskId: {}", taskId, e);
 
-            return MetricsCollectionResponse.SummaryResult.builder()
-                    .status("FAILED")
-                    .summary("Failed to summarize metrics: " + e.getMessage())
-                    .build();
+            return new MetricsCollectionResponse.SummaryResult(
+                    TestSummaryConstants.STATUS_FAILED,
+                    "Failed to summarize metrics: " + e.getMessage(),
+                    null);
         }
     }
 
@@ -59,11 +55,10 @@ public class MetricsSummarizationService {
     }
 
     private Map<String, Object> generateDetails(Map<String, Object> metrics) {
-        Map<String, Object> details = new HashMap<>();
-        details.put("totalEndpoints", metrics.size());
-        details.put("collectionTimestamp", System.currentTimeMillis());
-        details.put("note", "Detailed analysis will be available after neural network integration");
-        details.put("endpoints", metrics.keySet());
-        return details;
+        return Map.of(
+                "totalEndpoints", metrics.size(),
+                "collectionTimestamp", System.currentTimeMillis(),
+                "note", "Detailed analysis will be available after neural network integration",
+                "endpoints", metrics.keySet());
     }
 }

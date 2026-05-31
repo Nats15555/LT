@@ -1,29 +1,33 @@
 package com.loadtest.app.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.loadtest.app.dto.SummarizationTaskEvent;
 import com.loadtest.app.dto.TestTaskEvent;
+import com.loadtest.app.persistence.KafkaOutboxEntity;
+import com.loadtest.app.persistence.KafkaOutboxRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Pageable;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doReturn;
+import static com.loadtest.app.testsupport.JsonTestSupport.stubWriteValueAsStringFailure;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -31,7 +35,7 @@ import static org.mockito.Mockito.when;
 class KafkaOutboxServiceTest {
 
     @Mock
-    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+    private KafkaOutboxRepository kafkaOutboxRepository;
     private final ObjectMapper objectMapper = new ObjectMapper();
     @Mock
     private KafkaTemplate<String, TestTaskEvent> testTaskKafkaTemplate;
@@ -42,7 +46,7 @@ class KafkaOutboxServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new KafkaOutboxService(jdbcTemplate, objectMapper, testTaskKafkaTemplate, summarizationKafkaTemplate);
+        service = new KafkaOutboxService(kafkaOutboxRepository, objectMapper, testTaskKafkaTemplate, summarizationKafkaTemplate);
         ReflectionTestUtils.setField(service, "testTasksTopic", "tt");
         ReflectionTestUtils.setField(service, "summarizationTasksTopic", "st");
         ReflectionTestUtils.setField(service, "retryDelayMs", 5L);
@@ -50,38 +54,38 @@ class KafkaOutboxServiceTest {
     }
 
     @Test
-    void ensureTable_createsIndexes() {
-        service.ensureTable();
-        verify(jdbcTemplate, times(2)).execute(anyString());
+    void ensureSchema_createsTableAndIndex() {
+        service.ensureSchema();
+        verify(kafkaOutboxRepository).ensureTable();
+        verify(kafkaOutboxRepository).ensureRetryIndex();
     }
 
     @Test
-    void sendTestTaskEvent_successDoesNotWriteOutbox() throws Exception {
+    void sendTestTaskEvent_successDoesNotWriteOutbox() {
         @SuppressWarnings("unchecked")
         CompletableFuture<SendResult<String, TestTaskEvent>> future =
                 CompletableFuture.completedFuture(org.mockito.Mockito.mock(SendResult.class));
         when(testTaskKafkaTemplate.send(eq("tt"), anyString(), any(TestTaskEvent.class))).thenReturn(future);
-        service.sendTestTaskEvent("t1", TestTaskEvent.builder().taskId("t1").build());
-        verify(jdbcTemplate, never()).update(contains("INSERT INTO kafka_outbox"), any(), any(), any(), any(), any(),
-                any(), any(), any(), any());
+        service.sendTestTaskEvent("t1", new TestTaskEvent("t1"));
+        verify(kafkaOutboxRepository, never()).save(any());
     }
 
     @Test
     void sendTestTaskEvent_failurePersistsOutbox() {
-        when(testTaskKafkaTemplate.send(eq("tt"), anyString(), any(TestTaskEvent.class)))
-                .thenThrow(new RuntimeException("broker down"));
-        service.sendTestTaskEvent("t1", TestTaskEvent.builder().taskId("t1").build());
-        verify(jdbcTemplate).update(contains("INSERT INTO kafka_outbox"), any(), any(), any(), any(), any(), any(),
-                any(), any(), any());
+        CompletableFuture<SendResult<String, TestTaskEvent>> failed = new CompletableFuture<>();
+        failed.completeExceptionally(new RuntimeException("broker down"));
+        when(testTaskKafkaTemplate.send(eq("tt"), anyString(), any(TestTaskEvent.class))).thenReturn(failed);
+        service.sendTestTaskEvent("t1", new TestTaskEvent("t1"));
+        verify(kafkaOutboxRepository).save(any(KafkaOutboxEntity.class));
     }
 
     @Test
     void sendSummarizationTaskEvent_failurePersistsOutbox() {
-        when(summarizationKafkaTemplate.send(eq("st"), anyString(), any(SummarizationTaskEvent.class)))
-                .thenThrow(new RuntimeException("broker down"));
+        CompletableFuture<SendResult<String, SummarizationTaskEvent>> failed = new CompletableFuture<>();
+        failed.completeExceptionally(new RuntimeException("broker down"));
+        when(summarizationKafkaTemplate.send(eq("st"), anyString(), any(SummarizationTaskEvent.class))).thenReturn(failed);
         service.sendSummarizationTaskEvent("t1", new SummarizationTaskEvent("t1", "sum"));
-        verify(jdbcTemplate).update(contains("INSERT INTO kafka_outbox"), any(), any(), any(), any(), any(), any(),
-                any(), any(), any());
+        verify(kafkaOutboxRepository).save(any(KafkaOutboxEntity.class));
     }
 
     @Test
@@ -93,24 +97,15 @@ class KafkaOutboxServiceTest {
 
         service.sendSummarizationTaskEvent("s1", new SummarizationTaskEvent("s1", "sum"));
 
-        verify(jdbcTemplate, never()).update(contains("INSERT INTO kafka_outbox"), any(), any(), any(), any(), any(),
-                any(), any(), any(), any());
+        verify(kafkaOutboxRepository, never()).save(any());
     }
 
     @Test
-    void flushPending_marksSentForTestTaskEvent() throws Exception {
-        UUID outboxId = UUID.randomUUID();
-        TestTaskEvent evt = TestTaskEvent.builder().taskId("tid").build();
-        doReturn(List.of(
-                Map.of(
-                        "id", outboxId,
-                        "event_type", "TEST_TASK_EVENT",
-                        "topic", "tt",
-                        "event_key", "tid",
-                        "payload_json", objectMapper.writeValueAsString(evt),
-                        "attempts", 0)))
-                .when(jdbcTemplate)
-                .queryForList(contains("FROM kafka_outbox"), eq("APP"), eq("PENDING"), eq(10));
+    void flushPending_marksSentForTestTaskEvent() {
+        KafkaOutboxEntity row = outboxRow("TEST_TASK_EVENT", "tt", "tid", "{\"taskId\":\"tid\"}");
+        when(kafkaOutboxRepository.findByModuleAndStatusAndNextAttemptAtLessThanEqualOrderByCreatedAtAsc(
+                eq("APP"), eq("PENDING"), any(OffsetDateTime.class), any(Pageable.class)))
+                .thenReturn(List.of(row));
         @SuppressWarnings("unchecked")
         CompletableFuture<SendResult<String, TestTaskEvent>> future =
                 CompletableFuture.completedFuture(org.mockito.Mockito.mock(SendResult.class));
@@ -118,61 +113,43 @@ class KafkaOutboxServiceTest {
 
         service.flushPending();
 
-        verify(jdbcTemplate).update(contains("UPDATE kafka_outbox SET status"), eq("SENT"), eq(outboxId));
+        assertThat(row.getStatus()).isEqualTo("SENT");
+        assertThat(row.getLastError()).isNull();
     }
 
     @Test
     void flushPending_unknownEventType_updatesRetry() {
-        UUID outboxId = UUID.randomUUID();
-        doReturn(List.of(
-                Map.of(
-                        "id", outboxId,
-                        "event_type", "OTHER",
-                        "topic", "tt",
-                        "event_key", "k",
-                        "payload_json", "{}",
-                        "attempts", 0)))
-                .when(jdbcTemplate)
-                .queryForList(contains("FROM kafka_outbox"), eq("APP"), eq("PENDING"), eq(10));
+        KafkaOutboxEntity row = outboxRow("OTHER", "tt", "k", "{}");
+        when(kafkaOutboxRepository.findByModuleAndStatusAndNextAttemptAtLessThanEqualOrderByCreatedAtAsc(
+                eq("APP"), eq("PENDING"), any(OffsetDateTime.class), any(Pageable.class)))
+                .thenReturn(List.of(row));
 
         service.flushPending();
 
-        verify(jdbcTemplate).update(contains("attempts = attempts + 1"), any(), any(), eq(outboxId));
+        assertThat(row.getAttempts()).isEqualTo(1);
+        assertThat(row.getLastError()).isNotNull();
     }
 
     @Test
     void flushPending_invalidPayload_updatesRetry() {
-        UUID outboxId = UUID.randomUUID();
-        doReturn(List.of(
-                Map.of(
-                        "id", outboxId,
-                        "event_type", "TEST_TASK_EVENT",
-                        "topic", "tt",
-                        "event_key", "k",
-                        "payload_json", "{invalid-json",
-                        "attempts", 0)))
-                .when(jdbcTemplate)
-                .queryForList(contains("FROM kafka_outbox"), eq("APP"), eq("PENDING"), eq(10));
+        KafkaOutboxEntity row = outboxRow("TEST_TASK_EVENT", "tt", "k", "{invalid-json");
+        when(kafkaOutboxRepository.findByModuleAndStatusAndNextAttemptAtLessThanEqualOrderByCreatedAtAsc(
+                eq("APP"), eq("PENDING"), any(OffsetDateTime.class), any(Pageable.class)))
+                .thenReturn(List.of(row));
 
         service.flushPending();
 
-        verify(jdbcTemplate).update(contains("attempts = attempts + 1"), any(), any(), eq(outboxId));
+        assertThat(row.getAttempts()).isEqualTo(1);
     }
 
     @Test
-    void flushPending_summarizationEventUsesSummarizationTemplate() throws Exception {
-        UUID outboxId = UUID.randomUUID();
-        SummarizationTaskEvent evt = new SummarizationTaskEvent("tid", "sum");
-        doReturn(List.of(
-                Map.of(
-                        "id", outboxId,
-                        "event_type", "SUMMARIZATION_TASK_EVENT",
-                        "topic", "st",
-                        "event_key", "tid",
-                        "payload_json", objectMapper.writeValueAsString(evt),
-                        "attempts", 0)))
-                .when(jdbcTemplate)
-                .queryForList(contains("FROM kafka_outbox"), eq("APP"), eq("PENDING"), eq(10));
+    void flushPending_summarizationEventUsesSummarizationTemplate() {
+        KafkaOutboxEntity row = outboxRow(
+                "SUMMARIZATION_TASK_EVENT", "st", "tid",
+                "{\"taskId\":\"tid\",\"summarizerName\":\"sum\",\"customPrompt\":null}");
+        when(kafkaOutboxRepository.findByModuleAndStatusAndNextAttemptAtLessThanEqualOrderByCreatedAtAsc(
+                eq("APP"), eq("PENDING"), any(OffsetDateTime.class), any(Pageable.class)))
+                .thenReturn(List.of(row));
         @SuppressWarnings("unchecked")
         CompletableFuture<SendResult<String, SummarizationTaskEvent>> future =
                 CompletableFuture.completedFuture(org.mockito.Mockito.mock(SendResult.class));
@@ -181,36 +158,29 @@ class KafkaOutboxServiceTest {
         service.flushPending();
 
         verify(summarizationKafkaTemplate).send(eq("st"), eq("tid"), any(SummarizationTaskEvent.class));
-        verify(jdbcTemplate).update(contains("UPDATE kafka_outbox SET status"), eq("SENT"), eq(outboxId));
+        assertThat(row.getStatus()).isEqualTo("SENT");
     }
 
     @Test
-    void flushPending_sendFailureAfterParse_updatesRetry() throws Exception {
-        UUID outboxId = UUID.randomUUID();
-        TestTaskEvent evt = TestTaskEvent.builder().taskId("tid").build();
-        doReturn(List.of(
-                Map.of(
-                        "id", outboxId,
-                        "event_type", "TEST_TASK_EVENT",
-                        "topic", "tt",
-                        "event_key", "tid",
-                        "payload_json", objectMapper.writeValueAsString(evt),
-                        "attempts", 0)))
-                .when(jdbcTemplate)
-                .queryForList(contains("FROM kafka_outbox"), eq("APP"), eq("PENDING"), eq(10));
-        when(testTaskKafkaTemplate.send(eq("tt"), eq("tid"), any(TestTaskEvent.class)))
-                .thenThrow(new RuntimeException("send failed"));
+    void flushPending_sendFailureAfterParse_updatesRetry() {
+        KafkaOutboxEntity row = outboxRow("TEST_TASK_EVENT", "tt", "tid", "{\"taskId\":\"tid\"}");
+        when(kafkaOutboxRepository.findByModuleAndStatusAndNextAttemptAtLessThanEqualOrderByCreatedAtAsc(
+                eq("APP"), eq("PENDING"), any(OffsetDateTime.class), any(Pageable.class)))
+                .thenReturn(List.of(row));
+        CompletableFuture<SendResult<String, TestTaskEvent>> failed = new CompletableFuture<>();
+        failed.completeExceptionally(new RuntimeException("send failed"));
+        when(testTaskKafkaTemplate.send(eq("tt"), eq("tid"), any(TestTaskEvent.class))).thenReturn(failed);
 
         service.flushPending();
 
-        verify(jdbcTemplate).update(contains("attempts = attempts + 1"), any(), any(), eq(outboxId));
+        assertThat(row.getAttempts()).isEqualTo(1);
     }
 
     @Test
     void flushPending_withNoRows_doesNothing() {
-        doReturn(List.of())
-                .when(jdbcTemplate)
-                .queryForList(contains("FROM kafka_outbox"), eq("APP"), eq("PENDING"), eq(10));
+        when(kafkaOutboxRepository.findByModuleAndStatusAndNextAttemptAtLessThanEqualOrderByCreatedAtAsc(
+                eq("APP"), eq("PENDING"), any(OffsetDateTime.class), any(Pageable.class)))
+                .thenReturn(List.of());
 
         service.flushPending();
 
@@ -221,41 +191,47 @@ class KafkaOutboxServiceTest {
     @Test
     void sendTestTaskEvent_payloadSerializationFailure_usesFallbackJson() {
         ObjectMapper badOm = org.mockito.Mockito.mock(ObjectMapper.class);
-        KafkaOutboxService s2 = new KafkaOutboxService(jdbcTemplate, badOm, testTaskKafkaTemplate, summarizationKafkaTemplate);
+        KafkaOutboxService s2 = new KafkaOutboxService(kafkaOutboxRepository, badOm, testTaskKafkaTemplate, summarizationKafkaTemplate);
         ReflectionTestUtils.setField(s2, "testTasksTopic", "tt");
         ReflectionTestUtils.setField(s2, "summarizationTasksTopic", "st");
-        when(testTaskKafkaTemplate.send(eq("tt"), anyString(), any(TestTaskEvent.class)))
-                .thenThrow(new RuntimeException("broker down"));
-        try {
-            when(badOm.writeValueAsString(any())).thenThrow(new RuntimeException("ser"));
-        } catch (Exception ignored) {
-        }
+        CompletableFuture<SendResult<String, TestTaskEvent>> failed = new CompletableFuture<>();
+        failed.completeExceptionally(new RuntimeException("broker down"));
+        when(testTaskKafkaTemplate.send(eq("tt"), anyString(), any(TestTaskEvent.class))).thenReturn(failed);
+        stubWriteValueAsStringFailure(badOm, new JsonProcessingException("ser") {});
 
-        s2.sendTestTaskEvent("t-ser", TestTaskEvent.builder().taskId("t-ser").build());
+        s2.sendTestTaskEvent("t-ser", new TestTaskEvent("t-ser"));
 
-        verify(jdbcTemplate).update(
-                contains("INSERT INTO kafka_outbox"),
-                any(),
-                any(),
-                any(),
-                any(),
-                any(),
-                eq("{\"error\":\"payload-serialization-failed\"}"),
-                any(),
-                any(),
-                any()
-        );
+        ArgumentCaptor<KafkaOutboxEntity> captor = ArgumentCaptor.forClass(KafkaOutboxEntity.class);
+        verify(kafkaOutboxRepository).save(captor.capture());
+        assertThat(captor.getValue().getPayloadJson()).isEqualTo("{\"error\":\"payload-serialization-failed\"}");
     }
 
     @Test
     void shrinkError_handlesNullAndLongMessage() {
-        Exception withNull = new RuntimeException((String) null);
+        KafkaOutboxPublishException withNull = new KafkaOutboxPublishException("Kafka publish failed", null);
         String m1 = ReflectionTestUtils.invokeMethod(service, "shrinkError", withNull);
-        org.assertj.core.api.Assertions.assertThat(m1).isEqualTo("RuntimeException: ");
+        assertThat(m1).isEqualTo("KafkaOutboxPublishException: Kafka publish failed");
 
         String longMsg = "x".repeat(2500);
-        Exception longEx = new RuntimeException(longMsg);
+        KafkaOutboxPublishException longEx = new KafkaOutboxPublishException(longMsg, null);
         String m2 = ReflectionTestUtils.invokeMethod(service, "shrinkError", longEx);
-        org.assertj.core.api.Assertions.assertThat(m2.length()).isEqualTo(2000);
+        assertThat(m2.length()).isEqualTo(2000);
+    }
+
+    private static KafkaOutboxEntity outboxRow(String eventType, String topic, String key, String payloadJson) {
+        OffsetDateTime now = OffsetDateTime.now();
+        return KafkaOutboxEntity.builder()
+                .id(UUID.randomUUID())
+                .module("APP")
+                .eventType(eventType)
+                .topic(topic)
+                .eventKey(key)
+                .payloadJson(payloadJson)
+                .status("PENDING")
+                .attempts(0)
+                .nextAttemptAt(now)
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
     }
 }

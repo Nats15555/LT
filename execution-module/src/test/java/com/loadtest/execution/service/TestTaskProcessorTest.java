@@ -35,7 +35,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class TestTaskProcessorTest {
 
-    @TempDir java.nio.file.Path uploadRoot;
+    @TempDir Path uploadRoot;
 
     @Mock private ContainerExecutionService executionService;
 
@@ -47,110 +47,120 @@ class TestTaskProcessorTest {
         ReflectionTestUtils.setField(processor, "uploadDir", uploadRoot.toString());
     }
 
+    private static String b64(String text) {
+        return Base64.getEncoder().encodeToString(text.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static TestTaskMessage message(
+            String taskId,
+            String testTool,
+            String testFileName,
+            String testFileContent,
+            String command,
+            Integer expectedDurationSeconds,
+            TestTaskMessage.MetricsConfig metricsConfig,
+            String dockerExecutionProfileId) {
+        return new TestTaskMessage(
+                taskId, testTool, testFileName, testFileContent, command,
+                expectedDurationSeconds, null, null, metricsConfig, dockerExecutionProfileId);
+    }
+
+    private TestTaskMessage baseValidMessage() {
+        return message(
+                UUID.randomUUID().toString(),
+                "k6",
+                "t.py",
+                b64("a"),
+                "run",
+                10,
+                null,
+                UUID.randomUUID().toString());
+    }
+
     @Test
     void rejectsMissingFileName() {
-        TestTaskMessage msg = new TestTaskMessage();
-        msg.setTaskId(UUID.randomUUID().toString());
-        msg.setTestFileContent(Base64.getEncoder().encodeToString("a".getBytes(StandardCharsets.UTF_8)));
-        msg.setExpectedDurationSeconds(10);
+        TestTaskMessage msg = message(
+                UUID.randomUUID().toString(), null, null, b64("a"), null, 10, null, null);
         assertThatThrownBy(() -> processor.process(msg)).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("file name");
     }
 
     @Test
     void rejectsWhitespaceOnlyFileName() {
-        TestTaskMessage msg = new TestTaskMessage();
-        msg.setTaskId(UUID.randomUUID().toString());
-        msg.setTestFileName("   ");
-        msg.setTestFileContent(Base64.getEncoder().encodeToString("a".getBytes(StandardCharsets.UTF_8)));
-        msg.setExpectedDurationSeconds(10);
+        TestTaskMessage msg = message(
+                UUID.randomUUID().toString(), null, "   ", b64("a"), null, 10, null, null);
         assertThatThrownBy(() -> processor.process(msg)).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("file name");
     }
 
     @Test
     void rejectsMissingFileContent() {
-        TestTaskMessage msg = new TestTaskMessage();
-        msg.setTaskId(UUID.randomUUID().toString());
-        msg.setTestFileName("t.py");
-        msg.setExpectedDurationSeconds(10);
+        TestTaskMessage msg = message(
+                UUID.randomUUID().toString(), null, "t.py", null, null, 10, null, null);
         assertThatThrownBy(() -> processor.process(msg)).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("content");
     }
 
     @Test
     void rejectsWhitespaceOnlyFileContent() {
-        TestTaskMessage msg = new TestTaskMessage();
-        msg.setTaskId(UUID.randomUUID().toString());
-        msg.setTestFileName("t.py");
-        msg.setTestFileContent("  \t  ");
-        msg.setExpectedDurationSeconds(10);
+        TestTaskMessage msg = message(
+                UUID.randomUUID().toString(), null, "t.py", "  \t  ", null, 10, null, null);
         assertThatThrownBy(() -> processor.process(msg)).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("content");
     }
 
     @Test
     void rejectsInvalidDuration() {
-        TestTaskMessage msg = new TestTaskMessage();
-        msg.setTaskId(UUID.randomUUID().toString());
-        msg.setTestFileName("t.py");
-        msg.setTestFileContent(Base64.getEncoder().encodeToString("a".getBytes(StandardCharsets.UTF_8)));
-        msg.setExpectedDurationSeconds(0);
+        TestTaskMessage msg = message(
+                UUID.randomUUID().toString(), null, "t.py", b64("a"), null, 0, null, null);
         assertThatThrownBy(() -> processor.process(msg)).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("expectedDurationSeconds");
     }
 
     @Test
-    void rejectsMissingDockerProfileId() throws Exception {
-        TestTaskMessage msg = new TestTaskMessage();
-        msg.setTaskId(UUID.randomUUID().toString());
-        msg.setTestFileName("t.py");
-        msg.setTestFileContent(Base64.getEncoder().encodeToString("a".getBytes(StandardCharsets.UTF_8)));
-        msg.setExpectedDurationSeconds(5);
-        msg.setCommand("run");
-        msg.setTestTool("k6");
+    void rejectsMissingDockerProfileId() {
+        TestTaskMessage msg = message(
+                UUID.randomUUID().toString(), "k6", "t.py", b64("a"), "run", 5, null, null);
         assertThatThrownBy(() -> processor.process(msg)).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("dockerExecutionProfileId");
     }
 
     @Test
     void rejectsBlankDockerProfileId() {
-        TestTaskMessage msg = baseValidMessage();
-        msg.setDockerExecutionProfileId("   ");
+        TestTaskMessage base = baseValidMessage();
+        TestTaskMessage msg = message(
+                base.taskId(), base.testTool(), base.testFileName(), base.testFileContent(),
+                base.command(), base.expectedDurationSeconds(), base.metricsConfig(), "   ");
         assertThatThrownBy(() -> processor.process(msg)).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("dockerExecutionProfileId");
     }
 
     @Test
     void rejectsNullExpectedDurationSeconds() {
-        TestTaskMessage msg = baseValidMessage();
-        msg.setExpectedDurationSeconds(null);
+        TestTaskMessage base = baseValidMessage();
+        TestTaskMessage msg = message(
+                base.taskId(), base.testTool(), base.testFileName(), base.testFileContent(),
+                base.command(), null, base.metricsConfig(), base.dockerExecutionProfileId());
         assertThatThrownBy(() -> processor.process(msg)).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("expectedDurationSeconds");
     }
 
     @Test
     void success_withMetricsConfigConfiguredBranch() throws Exception {
-        TestTaskMessage msg = baseValidMessage();
-        TestTaskMessage.MetricsConfig cfg = new TestTaskMessage.MetricsConfig();
-        cfg.setDelaySeconds(2);
-        cfg.setRequests(List.of(new TestTaskMessage.MetricsConfig.MetricsRequest("m", "GET", "http://x", null, null, null)));
-        msg.setMetricsConfig(cfg);
+        TestTaskMessage.MetricsConfig cfg = new TestTaskMessage.MetricsConfig(
+                2, List.of(new TestTaskMessage.MetricsConfig.MetricsRequest("m", "GET", "http://x", null, null, null)));
+        TestTaskMessage msg = withMetricsConfig(baseValidMessage(), cfg);
         when(executionService.executeTestWithAutoCleanup(any()))
-                .thenReturn(ExecutionResponse.builder().status("success").executionTime(1L).build());
+                .thenReturn(new ExecutionResponse("success", null, null, null, null, 1L, null, null));
         assertThat(processor.process(msg)).isNotNull();
         verify(executionService).executeTestWithAutoCleanup(any());
     }
 
     @Test
     void success_metricsConfigPresent_requestsNull_logsRequestsAsZero() throws Exception {
-        TestTaskMessage msg = baseValidMessage();
-        TestTaskMessage.MetricsConfig cfg = new TestTaskMessage.MetricsConfig();
-        cfg.setDelaySeconds(1);
-        cfg.setRequests(null);
-        msg.setMetricsConfig(cfg);
+        TestTaskMessage msg = withMetricsConfig(baseValidMessage(), new TestTaskMessage.MetricsConfig(1, null));
         when(executionService.executeTestWithAutoCleanup(any()))
-                .thenReturn(ExecutionResponse.builder().status("success").executionTime(1L).build());
+                .thenReturn(new ExecutionResponse("success", null, null, null, null, 1L, null, null));
         assertThat(processor.process(msg)).isNotNull();
         verify(executionService).executeTestWithAutoCleanup(any());
     }
@@ -158,21 +168,20 @@ class TestTaskProcessorTest {
     @Test
     void success_metricsConfigAbsent_logsElseBranch() throws Exception {
         TestTaskMessage msg = baseValidMessage();
-        msg.setMetricsConfig(null);
         when(executionService.executeTestWithAutoCleanup(any()))
-                .thenReturn(ExecutionResponse.builder().status("success").executionTime(1L).build());
+                .thenReturn(new ExecutionResponse("success", null, null, null, null, 1L, null, null));
         assertThat(processor.process(msg)).isNotNull();
     }
 
     @Test
-    void success_createsUploadDirectoryWhenAbsent(@TempDir java.nio.file.Path parent) throws Exception {
-        java.nio.file.Path nestedUpload = parent.resolve("nested-upload");
+    void success_createsUploadDirectoryWhenAbsent(@TempDir Path parent) throws Exception {
+        Path nestedUpload = parent.resolve("nested-upload");
         ReflectionTestUtils.setField(processor, "uploadDir", nestedUpload.toString());
         TestTaskMessage msg = baseValidMessage();
         when(executionService.executeTestWithAutoCleanup(any()))
-                .thenReturn(ExecutionResponse.builder().status("success").executionTime(1L).build());
+                .thenReturn(new ExecutionResponse("success", null, null, null, null, 1L, null, null));
         assertThat(processor.process(msg)).isNotNull();
-        assertThat(java.nio.file.Files.isDirectory(nestedUpload)).isTrue();
+        assertThat(Files.isDirectory(nestedUpload)).isTrue();
     }
 
     @Test
@@ -195,18 +204,10 @@ class TestTaskProcessorTest {
         assertThat(TestTaskProcessor.shouldDeleteTemporaryTestFile(f)).isTrue();
     }
 
-    private TestTaskMessage baseValidMessage() {
-        UUID taskId = UUID.randomUUID();
-        UUID profileId = UUID.randomUUID();
-        TestTaskMessage msg = new TestTaskMessage();
-        msg.setTaskId(taskId.toString());
-        msg.setTestFileName("t.py");
-        msg.setTestFileContent(Base64.getEncoder().encodeToString("a".getBytes(StandardCharsets.UTF_8)));
-        msg.setExpectedDurationSeconds(10);
-        msg.setCommand("run");
-        msg.setTestTool("k6");
-        msg.setDockerExecutionProfileId(profileId.toString());
-        return msg;
+    private TestTaskMessage withMetricsConfig(TestTaskMessage base, TestTaskMessage.MetricsConfig cfg) {
+        return message(
+                base.taskId(), base.testTool(), base.testFileName(), base.testFileContent(),
+                base.command(), base.expectedDurationSeconds(), cfg, base.dockerExecutionProfileId());
     }
 
     @Test
@@ -215,7 +216,7 @@ class TestTaskProcessorTest {
             files.when(() -> Files.delete(any(Path.class))).thenThrow(new IOException("delete blocked"));
             TestTaskMessage msg = baseValidMessage();
             when(executionService.executeTestWithAutoCleanup(any()))
-                    .thenReturn(ExecutionResponse.builder().status("success").executionTime(1L).build());
+                    .thenReturn(new ExecutionResponse("success", null, null, null, null, 1L, null, null));
             assertThat(processor.process(msg)).isNotNull();
             verify(executionService).executeTestWithAutoCleanup(any());
         }
@@ -235,7 +236,7 @@ class TestTaskProcessorTest {
     @Test
     void finally_onExecuteFailure_whenDeleteSucceeds_innerCatchNotTaken() throws Exception {
         TestTaskMessage msg = baseValidMessage();
-        Path saved = Paths.get(uploadRoot.toString()).resolve(msg.getTestFileName());
+        Path saved = Paths.get(uploadRoot.toString()).resolve(msg.testFileName());
         when(executionService.executeTestWithAutoCleanup(any())).thenThrow(new RuntimeException("run failed"));
         assertThatThrownBy(() -> processor.process(msg)).isInstanceOf(RuntimeException.class).hasMessageContaining("run failed");
         assertThat(Files.exists(saved)).isFalse();
@@ -245,7 +246,7 @@ class TestTaskProcessorTest {
     void finally_onExecuteFailure_whenFileAlreadyMissing_skipsDeleteOnExceptionHandlerPath() throws Exception {
         TestTaskMessage msg = baseValidMessage();
         String dir = (String) ReflectionTestUtils.getField(processor, "uploadDir");
-        Path saved = Paths.get(dir).resolve(msg.getTestFileName());
+        Path saved = Paths.get(dir).resolve(msg.testFileName());
         try (MockedStatic<Files> files = Mockito.mockStatic(Files.class, Mockito.withSettings().defaultAnswer(Mockito.CALLS_REAL_METHODS))) {
             files.when(() -> Files.exists(any(Path.class))).thenAnswer(invocation -> {
                 Path p = invocation.getArgument(0);
@@ -264,7 +265,7 @@ class TestTaskProcessorTest {
     void finally_skipsCleanupWhenSavedFileAlreadyMissing() throws Exception {
         TestTaskMessage msg = baseValidMessage();
         String dir = (String) ReflectionTestUtils.getField(processor, "uploadDir");
-        Path saved = Paths.get(dir).resolve(msg.getTestFileName());
+        Path saved = Paths.get(dir).resolve(msg.testFileName());
         try (MockedStatic<Files> files = Mockito.mockStatic(Files.class, Mockito.withSettings().defaultAnswer(Mockito.CALLS_REAL_METHODS))) {
             files.when(() -> Files.exists(any(Path.class))).thenAnswer(invocation -> {
                 Path p = invocation.getArgument(0);
@@ -274,7 +275,7 @@ class TestTaskProcessorTest {
                 return p.toFile().exists();
             });
             when(executionService.executeTestWithAutoCleanup(any()))
-                    .thenReturn(ExecutionResponse.builder().status("success").executionTime(1L).build());
+                    .thenReturn(new ExecutionResponse("success", null, null, null, null, 1L, null, null));
             assertThat(processor.process(msg)).isNotNull();
         }
         assertThat(Files.exists(saved)).isTrue();
@@ -284,7 +285,7 @@ class TestTaskProcessorTest {
     void finally_filesExistsThrowsAfterSuccess_propagatesFromFinally() throws Exception {
         TestTaskMessage msg = baseValidMessage();
         String dir = (String) ReflectionTestUtils.getField(processor, "uploadDir");
-        Path saved = Paths.get(dir).resolve(msg.getTestFileName());
+        Path saved = Paths.get(dir).resolve(msg.testFileName());
         try (MockedStatic<Files> files = Mockito.mockStatic(Files.class, Mockito.withSettings().defaultAnswer(Mockito.CALLS_REAL_METHODS))) {
             files.when(() -> Files.exists(any(Path.class))).thenAnswer(invocation -> {
                 Path p = invocation.getArgument(0);
@@ -294,7 +295,7 @@ class TestTaskProcessorTest {
                 return p.toFile().exists();
             });
             when(executionService.executeTestWithAutoCleanup(any()))
-                    .thenReturn(ExecutionResponse.builder().status("success").executionTime(1L).build());
+                    .thenReturn(new ExecutionResponse("success", null, null, null, null, 1L, null, null));
             assertThatThrownBy(() -> processor.process(msg))
                     .isInstanceOf(RuntimeException.class)
                     .hasMessageContaining("exists boom");
@@ -305,7 +306,7 @@ class TestTaskProcessorTest {
     void finally_filesExistsThrowsAfterExecuteFailure_suppressesRunFailed() throws Exception {
         TestTaskMessage msg = baseValidMessage();
         String dir = (String) ReflectionTestUtils.getField(processor, "uploadDir");
-        Path saved = Paths.get(dir).resolve(msg.getTestFileName());
+        Path saved = Paths.get(dir).resolve(msg.testFileName());
         try (MockedStatic<Files> files = Mockito.mockStatic(Files.class, Mockito.withSettings().defaultAnswer(Mockito.CALLS_REAL_METHODS))) {
             files.when(() -> Files.exists(any(Path.class))).thenAnswer(invocation -> {
                 Path p = invocation.getArgument(0);
@@ -325,23 +326,17 @@ class TestTaskProcessorTest {
     void success_callsExecutionService() throws Exception {
         UUID taskId = UUID.randomUUID();
         UUID profileId = UUID.randomUUID();
-        TestTaskMessage msg = new TestTaskMessage();
-        msg.setTaskId(taskId.toString());
-        msg.setTestFileName("hello.txt");
-        msg.setTestFileContent(Base64.getEncoder().encodeToString("hi".getBytes(StandardCharsets.UTF_8)));
-        msg.setExpectedDurationSeconds(10);
-        msg.setCommand("echo run");
-        msg.setTestTool("k6");
-        msg.setDockerExecutionProfileId(profileId.toString());
+        TestTaskMessage msg = message(
+                taskId.toString(), "k6", "hello.txt", b64("hi"), "echo run", 10, null, profileId.toString());
 
         when(executionService.executeTestWithAutoCleanup(any()))
-                .thenReturn(ExecutionResponse.builder().status("success").executionTime(2L).build());
+                .thenReturn(new ExecutionResponse("success", null, null, null, null, 2L, null, null));
 
         assertThat(processor.process(msg)).isNotNull();
 
         ArgumentCaptor<ExecutionRequest> cap = ArgumentCaptor.forClass(ExecutionRequest.class);
         verify(executionService).executeTestWithAutoCleanup(cap.capture());
-        assertThat(cap.getValue().getTaskId()).isEqualTo(taskId);
-        assertThat(cap.getValue().getDockerExecutionProfileId()).isEqualTo(profileId);
+        assertThat(cap.getValue().taskId()).isEqualTo(taskId);
+        assertThat(cap.getValue().dockerExecutionProfileId()).isEqualTo(profileId);
     }
 }

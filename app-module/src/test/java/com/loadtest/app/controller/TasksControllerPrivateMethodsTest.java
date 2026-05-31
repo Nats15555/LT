@@ -49,6 +49,7 @@ class TasksControllerPrivateMethodsTest {
                 mock(SummarizerModelRepository.class),
                 mock(ExternalSummarizationCallbackService.class),
                 mock(ExternalLlmDispatchService.class),
+                new com.loadtest.app.service.CustomSummarizationPromptStore(),
                 mock(KafkaOutboxService.class),
                 mock(TestQueueService.class),
                 mock(QueuePauseService.class),

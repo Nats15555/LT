@@ -1,17 +1,10 @@
 package com.loadtest.summarization.dto;
 
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-
 import java.io.Serializable;
 
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
-public class SummarizationTaskEvent implements Serializable {
-    private String taskId;
-    private String summarizerName;
+public record SummarizationTaskEvent(String taskId, String summarizerName,
+                                     String customPrompt) implements Serializable {
+    public SummarizationTaskEvent(String taskId, String summarizerName) {
+        this(taskId, summarizerName, null);
+    }
 }

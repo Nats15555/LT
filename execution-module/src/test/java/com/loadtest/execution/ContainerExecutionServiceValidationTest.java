@@ -32,9 +32,7 @@ class ContainerExecutionServiceValidationTest {
         Files.writeString(f, "x");
         ContainerExecutionService svc = new ContainerExecutionService(
                 commandFromDbService, artifactCollectorService, dockerExecutionProfileRepository);
-        ExecutionRequest req = new ExecutionRequest();
-        req.setCommand("  ");
-        req.setTestFilePath(f.toAbsolutePath().toString());
+        ExecutionRequest req = new ExecutionRequest(null, "  ", f.toAbsolutePath().toString(), null, null, null);
         assertThatThrownBy(() -> svc.executeTestWithAutoCleanup(req))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Command");
@@ -46,9 +44,7 @@ class ContainerExecutionServiceValidationTest {
         Files.writeString(f, "x");
         ContainerExecutionService svc = new ContainerExecutionService(
                 commandFromDbService, artifactCollectorService, dockerExecutionProfileRepository);
-        ExecutionRequest req = new ExecutionRequest();
-        req.setCommand(null);
-        req.setTestFilePath(f.toAbsolutePath().toString());
+        ExecutionRequest req = new ExecutionRequest(null, null, f.toAbsolutePath().toString(), null, null, null);
         assertThatThrownBy(() -> svc.executeTestWithAutoCleanup(req))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Command");
@@ -58,9 +54,7 @@ class ContainerExecutionServiceValidationTest {
     void rejectsBlankTestFilePath() {
         ContainerExecutionService svc = new ContainerExecutionService(
                 commandFromDbService, artifactCollectorService, dockerExecutionProfileRepository);
-        ExecutionRequest req = new ExecutionRequest();
-        req.setCommand("run");
-        req.setTestFilePath(" ");
+        ExecutionRequest req = new ExecutionRequest(null, "run", " ", null, null, null);
         assertThatThrownBy(() -> svc.executeTestWithAutoCleanup(req))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Test file path");
@@ -70,9 +64,7 @@ class ContainerExecutionServiceValidationTest {
     void rejectsNullTestFilePath() {
         ContainerExecutionService svc = new ContainerExecutionService(
                 commandFromDbService, artifactCollectorService, dockerExecutionProfileRepository);
-        ExecutionRequest req = new ExecutionRequest();
-        req.setCommand("run");
-        req.setTestFilePath(null);
+        ExecutionRequest req = new ExecutionRequest(null, "run", null, null, null, null);
         assertThatThrownBy(() -> svc.executeTestWithAutoCleanup(req))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Test file path");
@@ -83,9 +75,7 @@ class ContainerExecutionServiceValidationTest {
         Path missing = dir.resolve("nope.py");
         ContainerExecutionService svc = new ContainerExecutionService(
                 commandFromDbService, artifactCollectorService, dockerExecutionProfileRepository);
-        ExecutionRequest req = new ExecutionRequest();
-        req.setCommand("run");
-        req.setTestFilePath(missing.toAbsolutePath().toString());
+        ExecutionRequest req = new ExecutionRequest(null, "run", missing.toAbsolutePath().toString(), null, null, null);
         assertThatThrownBy(() -> svc.executeTestWithAutoCleanup(req))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("not found");
@@ -97,10 +87,7 @@ class ContainerExecutionServiceValidationTest {
         Files.writeString(f, "x");
         ContainerExecutionService svc = new ContainerExecutionService(
                 commandFromDbService, artifactCollectorService, dockerExecutionProfileRepository);
-        ExecutionRequest req = new ExecutionRequest();
-        req.setCommand("run");
-        req.setTestFilePath(f.toAbsolutePath().toString());
-        req.setTestTool("  ");
+        ExecutionRequest req = new ExecutionRequest("  ", "run", f.toAbsolutePath().toString(), null, null, null);
         assertThatThrownBy(() -> svc.executeTestWithAutoCleanup(req))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("tool");
@@ -112,10 +99,7 @@ class ContainerExecutionServiceValidationTest {
         Files.writeString(f, "x");
         ContainerExecutionService svc = new ContainerExecutionService(
                 commandFromDbService, artifactCollectorService, dockerExecutionProfileRepository);
-        ExecutionRequest req = new ExecutionRequest();
-        req.setCommand("run");
-        req.setTestFilePath(f.toAbsolutePath().toString());
-        req.setTestTool(null);
+        ExecutionRequest req = new ExecutionRequest(null, "run", f.toAbsolutePath().toString(), null, null, null);
         assertThatThrownBy(() -> svc.executeTestWithAutoCleanup(req))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("tool");
@@ -128,10 +112,7 @@ class ContainerExecutionServiceValidationTest {
         when(commandFromDbService.getToolByName("UNKNOWN")).thenReturn(Optional.empty());
         ContainerExecutionService svc = new ContainerExecutionService(
                 commandFromDbService, artifactCollectorService, dockerExecutionProfileRepository);
-        ExecutionRequest req = new ExecutionRequest();
-        req.setCommand("run");
-        req.setTestFilePath(f.toAbsolutePath().toString());
-        req.setTestTool("unknown");
+        ExecutionRequest req = new ExecutionRequest("unknown", "run", f.toAbsolutePath().toString(), null, null, null);
         assertThatThrownBy(() -> svc.executeTestWithAutoCleanup(req))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Unknown");
@@ -146,11 +127,7 @@ class ContainerExecutionServiceValidationTest {
         when(commandFromDbService.getToolByName("LOCUST")).thenReturn(Optional.of(tool));
         ContainerExecutionService svc = new ContainerExecutionService(
                 commandFromDbService, artifactCollectorService, dockerExecutionProfileRepository);
-        ExecutionRequest req = new ExecutionRequest();
-        req.setCommand("run");
-        req.setTestFilePath(f.toAbsolutePath().toString());
-        req.setTestTool("locust");
-        req.setDockerExecutionProfileId(null);
+        ExecutionRequest req = new ExecutionRequest("locust", "run", f.toAbsolutePath().toString(), null, null, null);
         assertThatThrownBy(() -> svc.executeTestWithAutoCleanup(req))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("dockerExecutionProfileId");
@@ -167,11 +144,8 @@ class ContainerExecutionServiceValidationTest {
         when(dockerExecutionProfileRepository.findByIdAndEnabledTrue(profileId)).thenReturn(Optional.empty());
         ContainerExecutionService svc = new ContainerExecutionService(
                 commandFromDbService, artifactCollectorService, dockerExecutionProfileRepository);
-        ExecutionRequest req = new ExecutionRequest();
-        req.setCommand("run");
-        req.setTestFilePath(f.toAbsolutePath().toString());
-        req.setTestTool("locust");
-        req.setDockerExecutionProfileId(profileId);
+        ExecutionRequest req = new ExecutionRequest(
+                "locust", "run", f.toAbsolutePath().toString(), null, null, profileId);
         assertThatThrownBy(() -> svc.executeTestWithAutoCleanup(req))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Docker profile");

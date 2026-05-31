@@ -1,5 +1,6 @@
 package com.loadtest.app.controller;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.loadtest.app.dto.ArtifactInfoDto;
 import com.loadtest.app.dto.MetricsItemDto;
@@ -21,12 +22,19 @@ import com.loadtest.app.persistence.TestTaskEntity;
 import com.loadtest.app.persistence.TestTaskHistoryEntity;
 import com.loadtest.app.persistence.TestTaskHistoryRepository;
 import com.loadtest.app.persistence.TestTaskRepository;
+import com.loadtest.app.service.CustomSummarizationPromptStore;
 import com.loadtest.app.service.ExternalLlmDispatchService;
 import com.loadtest.app.service.ExternalSummarizationCallbackService;
 import com.loadtest.app.service.KafkaOutboxService;
 import com.loadtest.app.service.QueuePauseService;
 import com.loadtest.app.service.TestQueueService;
+import com.loadtest.app.util.ApiJsonKeys;
+import com.loadtest.app.util.ApiMessages;
+import com.loadtest.app.util.ApiResponseValues;
+import com.loadtest.app.util.RequestBodyHelper;
 import com.loadtest.app.util.ResponseHelper;
+import com.loadtest.app.util.SummarizerProviders;
+import com.loadtest.app.util.SummarizerRouteMessages;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -34,19 +42,20 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.stream.Collectors;
 import java.util.zip.GZIPInputStream;
 
 @Slf4j
@@ -64,6 +73,7 @@ public class TasksController {
     private final SummarizerModelRepository summarizerModelRepository;
     private final ExternalSummarizationCallbackService externalSummarizationCallbackService;
     private final ExternalLlmDispatchService externalLlmDispatchService;
+    private final CustomSummarizationPromptStore customSummarizationPromptStore;
     private final KafkaOutboxService kafkaOutboxService;
     private final TestQueueService testQueueService;
     private final QueuePauseService queuePauseService;
@@ -75,16 +85,16 @@ public class TasksController {
     public Map<String, Object> getQueuePause() {
         var s = queuePauseService.getState();
         return Map.of(
-                "paused", s.paused(),
-                "pendingKafkaDispatchCount", s.pendingKafkaDispatchCount());
+                ApiJsonKeys.PAUSED, s.paused(),
+                ApiJsonKeys.PENDING_KAFKA_DISPATCH_COUNT, s.pendingKafkaDispatchCount());
     }
 
     @PutMapping("/queue/pause")
     public ResponseEntity<Map<String, Object>> setQueuePause(@RequestBody Map<String, Object> body) {
-        if (body == null || !body.containsKey("paused")) {
-            return ResponseEntity.badRequest().body(Map.of("message", "Тело JSON должно содержать поле paused (boolean)."));
+        if (body == null || !body.containsKey(ApiJsonKeys.PAUSED)) {
+            return ResponseEntity.badRequest().body(Map.of(ApiJsonKeys.MESSAGE, ApiMessages.Tasks.QUEUE_PAUSE_BODY));
         }
-        Object raw = body.get("paused");
+        Object raw = body.get(ApiJsonKeys.PAUSED);
         boolean paused;
         if (raw instanceof Boolean b) {
             paused = b;
@@ -93,8 +103,8 @@ public class TasksController {
         }
         var s = queuePauseService.setPaused(paused);
         return ResponseEntity.ok(Map.of(
-                "paused", s.paused(),
-                "pendingKafkaDispatchCount", s.pendingKafkaDispatchCount()));
+                ApiJsonKeys.PAUSED, s.paused(),
+                ApiJsonKeys.PENDING_KAFKA_DISPATCH_COUNT, s.pendingKafkaDispatchCount()));
     }
 
     @GetMapping("/tasks")
@@ -107,25 +117,18 @@ public class TasksController {
         var p = taskRepository.findAllByOrderByCreatedAtDesc(PageRequest.of(safePage, safeSize));
         List<TaskQueueItemDto> items = p.getContent().stream()
                 .map(this::toQueueDto)
-                .collect(Collectors.toList());
+                .toList();
 
-        return Map.of(
-                "items", items,
-                "page", safePage,
-                "size", safeSize,
-                "totalElements", p.getTotalElements(),
-                "totalPages", p.getTotalPages());
+        return paginatedResponse(items, safePage, safeSize, p);
     }
 
     @DeleteMapping("/tasks/{taskId}")
-    public ResponseEntity<Map<String, String>> deleteQueuedTask(@PathVariable UUID taskId) {
+    public ResponseEntity<Map<String, Object>> deleteQueuedTask(@PathVariable UUID taskId) {
         return switch (testQueueService.deletePendingQueueTask(taskId)) {
-            case DELETED -> ResponseEntity.ok(Map.of(
-                    "status", "success",
-                    "message", "Задача удалена из очереди"));
+            case DELETED -> ResponseEntity.ok(ResponseHelper.simpleSuccessBody(ApiMessages.Tasks.QUEUE_TASK_DELETED));
             case NOT_FOUND -> ResponseEntity.notFound().build();
             case NOT_DELETABLE -> ResponseHelper.buildErrorResponse(HttpStatus.CONFLICT,
-                    "Нельзя удалить задачу: она уже выполняется (PROCESSING) или не в статусе ожидания.");
+                    ApiMessages.Tasks.TASK_NOT_DELETABLE);
         };
     }
 
@@ -147,14 +150,9 @@ public class TasksController {
         var p = historyRepository.findAllByOrderByCreatedAtDesc(PageRequest.of(safePage, safeSize));
         List<TaskHistoryItemDto> items = p.getContent().stream()
                 .map(this::toHistoryDtoWithContent)
-                .collect(Collectors.toList());
+                .toList();
 
-        return Map.of(
-                "items", items,
-                "page", safePage,
-                "size", safeSize,
-                "totalElements", p.getTotalElements(),
-                "totalPages", p.getTotalPages());
+        return paginatedResponse(items, safePage, safeSize, p);
     }
 
     @GetMapping("/history/{taskId}")
@@ -174,31 +172,31 @@ public class TasksController {
             return ResponseEntity.notFound().build();
         }
         String summarizerOverride = null;
-        if (body != null && body.get("summarizer") != null) {
-            String s = String.valueOf(body.get("summarizer")).trim();
+        if (body != null && body.get(ApiJsonKeys.SUMMARIZER) != null) {
+            String s = String.valueOf(body.get(ApiJsonKeys.SUMMARIZER)).trim();
             if (!s.isEmpty()) {
                 summarizerOverride = s;
             }
         }
         if (summarizerOverride != null) {
             var route = summarizerModelRepository.findByName(summarizerOverride).orElse(null);
-            if (route == null) {
-                return ResponseEntity.badRequest().body(Map.of(
-                        "message", "Маршрут LLM «" + summarizerOverride + "» не найден."));
-            }
-            if (!Boolean.TRUE.equals(route.getEnabled())) {
-                return ResponseEntity.badRequest().body(Map.of(
-                        "message", "Маршрут LLM выключен (enabled=false). Включите его или выберите другой."));
-            }
-            if ("EXTERNAL".equalsIgnoreCase(route.getProvider())
-                    && (route.getBaseUrl() == null || route.getBaseUrl().isBlank())) {
-                return ResponseEntity.badRequest().body(Map.of(
-                        "message", "У маршрута EXTERNAL не задан URL приёма пакета (baseUrl)."));
+            ResponseEntity<Map<String, String>> routeError =
+                    validateSummarizerRoute(route, summarizerOverride, SummarizerValidationContext.RERUN);
+            if (routeError != null) {
+                return routeError;
             }
         }
+        String customPrompt = RequestBodyHelper.extractCustomPrompt(body);
         try {
             String newTaskId = testQueueService.rerunFromHistory(taskId, summarizerOverride);
-            return ResponseEntity.ok(Map.of("status", "success", "message", "Тест поставлен в очередь", "taskId", newTaskId));
+            if (customPrompt != null) {
+                customSummarizationPromptStore.put(UUID.fromString(newTaskId), customPrompt);
+                log.info("Stored custom summarization prompt for rerun taskId={} (in-memory, not DB)", newTaskId);
+            }
+            return ResponseEntity.ok(Map.of(
+                    ApiJsonKeys.STATUS, ApiResponseValues.STATUS_SUCCESS,
+                    ApiJsonKeys.MESSAGE, ApiMessages.Tasks.TEST_QUEUED,
+                    ApiJsonKeys.TASK_ID, newTaskId));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }
@@ -208,7 +206,7 @@ public class TasksController {
     public ResponseEntity<List<MetricsItemDto>> listMetrics(@PathVariable UUID taskId) {
         List<MetricsItemDto> list = metricsRepository.findByTaskIdOrderByCollectedAtAsc(taskId).stream()
                 .map(this::toMetricsDto)
-                .collect(Collectors.toList());
+                .toList();
         return ResponseEntity.ok(list);
     }
 
@@ -216,66 +214,66 @@ public class TasksController {
     public ResponseEntity<List<SummaryItemDto>> listSummary(@PathVariable UUID taskId) {
         List<SummaryItemDto> list = summaryRepository.findByTaskIdOrderByProcessedAtDesc(taskId).stream()
                 .map(this::toSummaryDto)
-                .collect(Collectors.toList());
+                .toList();
         return ResponseEntity.ok(list);
+    }
+
+    @GetMapping("/internal/custom-summarization-prompt/{taskId}")
+    public ResponseEntity<Map<String, String>> consumeStoredCustomSummarizationPrompt(@PathVariable UUID taskId) {
+        return customSummarizationPromptStore.consume(taskId)
+                .map(p -> ResponseEntity.ok(Map.of(ApiJsonKeys.CUSTOM_PROMPT, p)))
+                .orElse(ResponseEntity.noContent().build());
     }
 
     @PostMapping("/history/{taskId}/summarize")
     public ResponseEntity<Map<String, String>> requestSummarization(
             @PathVariable UUID taskId,
-            @RequestBody(required = false) Map<String, String> body) {
+            @RequestBody(required = false) Map<String, Object> body) {
         TestTaskHistoryEntity history = historyRepository.findById(taskId).orElse(null);
         if (history == null) {
             return ResponseEntity.notFound().build();
         }
-        String summarizer = body != null && body.containsKey("summarizer") ? body.get("summarizer") : history.getSummarizerName();
+        String customPrompt = RequestBodyHelper.extractCustomPrompt(body);
+        String summarizer = body != null && body.containsKey(ApiJsonKeys.SUMMARIZER)
+                ? String.valueOf(body.get(ApiJsonKeys.SUMMARIZER))
+                : history.getSummarizerName();
         if (summarizer == null || summarizer.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("message", "Укажите маршрут LLM (summarizer) или запустите тест с выбранным маршрутом в форме /upload"));
+            return ResponseEntity.badRequest().body(ResponseHelper.messageBody(SummarizerRouteMessages.SUMMARIZER_REQUIRED));
         }
         String summarizerTrim = summarizer.trim();
         history.setSummarizerName(summarizerTrim);
         historyRepository.save(history);
 
-        SummarizerModelEntity route = summarizerModelRepository.findByName(summarizerTrim)
-                .orElse(null);
-        if (route == null) {
-            return ResponseEntity.badRequest().body(Map.of("message", "Маршрут LLM «" + summarizerTrim + "» не найден."));
-        }
-        if (!Boolean.TRUE.equals(route.getEnabled())) {
-            return ResponseEntity.badRequest().body(Map.of("message", "Маршрут LLM выключен (enabled=false). Включите его в конфигурации или выберите другой."));
+        SummarizerModelEntity route = summarizerModelRepository.findByName(summarizerTrim).orElse(null);
+        ResponseEntity<Map<String, String>> routeError =
+                validateSummarizerRoute(route, summarizerTrim, SummarizerValidationContext.SUMMARIZE);
+        if (routeError != null) {
+            return routeError;
         }
 
-        if ("EXTERNAL".equalsIgnoreCase(route.getProvider())) {
-            String ingest = route.getBaseUrl();
-            if (ingest == null || ingest.isBlank()) {
-                return ResponseEntity.badRequest().body(Map.of(
-                        "message",
-                        "У маршрута EXTERNAL не задан полный URL приёма пакета (baseUrl в записи summarizer_models)."));
-            }
+        if (SummarizerProviders.EXTERNAL.equalsIgnoreCase(route.getProvider())) {
             externalSummarizationCallbackService.registerPendingWindow(taskId, summarizerTrim);
             try {
-                externalLlmDispatchService.dispatchPackage(taskId);
+                externalLlmDispatchService.dispatchPackage(taskId, customPrompt);
             } catch (ResponseStatusException e) {
                 String msg = e.getReason();
                 if (msg == null || msg.isBlank()) {
-                    msg = "Не удалось отправить пакет во внешний контур (ingest). Проверьте base_url маршрута и доступность mock.";
+                    msg = ApiMessages.Tasks.EXTERNAL_DISPATCH_FAILED;
                 }
                 log.warn("External dispatch after UI summarize failed: taskId={}, httpStatus={}, message={}",
                         taskId, e.getStatusCode().value(), msg);
-                return ResponseEntity.status(e.getStatusCode().value()).body(Map.of("message", msg));
+                return ResponseEntity.status(e.getStatusCode().value()).body(ResponseHelper.messageBody(msg));
             }
             log.info("External summarization: window opened and package dispatched from UI: taskId={}, summarizer={}",
                     taskId, summarizerTrim);
-            return ResponseEntity.accepted().body(Map.of(
-                    "message",
-                    "Пакет метрик и артефактов отправлен на ingest внешнего контура. После приёма (received=true) mock должен вызвать POST …/external-llm/summary. "
-                            + "Ручной сценарий: GET /api/v1/loadtest/history/" + taskId + "/external-llm/package."));
+            return ResponseEntity.accepted().body(ResponseHelper.messageBody(
+                    ApiMessages.Tasks.EXTERNAL_PACKAGE_DISPATCHED.formatted(taskId)));
         }
 
         kafkaOutboxService.sendSummarizationTaskEvent(taskId.toString(),
-                new SummarizationTaskEvent(taskId.toString(), summarizerTrim));
+                new SummarizationTaskEvent(taskId.toString(), summarizerTrim, customPrompt));
         log.info("Summarization requested for taskId={}, summarizer={}", taskId, summarizerTrim);
-        return ResponseEntity.accepted().body(Map.of("message", "Суммаризация запрошена. Обновите страницу через несколько секунд."));
+        return ResponseEntity.accepted().body(ResponseHelper.messageBody(ApiMessages.Tasks.SUMMARIZATION_REQUESTED));
     }
 
     @GetMapping("/history/{taskId}/external-llm/package")
@@ -292,21 +290,19 @@ public class TasksController {
     public ResponseEntity<Map<String, String>> submitExternalLlmSummary(
             @PathVariable UUID taskId,
             @RequestBody Map<String, Object> body) {
-        Object raw = body != null ? body.get("text") : null;
+        Object raw = body != null ? body.get(ApiJsonKeys.TEXT) : null;
         String text = raw != null ? String.valueOf(raw) : null;
         externalSummarizationCallbackService.submitExternalSummary(taskId, text);
-        return ResponseEntity.ok(Map.of("status", "success", "message", "Отчёт сохранён"));
+        return ResponseEntity.ok(Map.of(
+                ApiJsonKeys.STATUS, ApiResponseValues.STATUS_SUCCESS,
+                ApiJsonKeys.MESSAGE, ApiMessages.Tasks.REPORT_SAVED));
     }
 
     @GetMapping("/artifacts/{taskId}")
     public ResponseEntity<List<ArtifactInfoDto>> listArtifacts(@PathVariable UUID taskId) {
         List<ArtifactInfoDto> list = artifactRepository.findByTaskIdOrderByFileName(taskId).stream()
-                .map(a -> ArtifactInfoDto.builder()
-                        .id(a.getId())
-                        .fileName(a.getFileName())
-                        .originalSizeBytes(a.getOriginalSizeBytes())
-                        .build())
-                .collect(Collectors.toList());
+                .map(a -> new ArtifactInfoDto(a.getId(), a.getFileName(), a.getOriginalSizeBytes()))
+                .toList();
         return ResponseEntity.ok(list);
     }
 
@@ -323,7 +319,7 @@ public class TasksController {
         if ("gzip".equalsIgnoreCase(a.getContentEncoding())) {
             try {
                 content = decompressGzip(content);
-            } catch (Exception e) {
+            } catch (IOException e) {
                 log.warn("Failed to decompress artifact {}", a.getFileName(), e);
                 return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
             }
@@ -335,20 +331,55 @@ public class TasksController {
         return ResponseEntity.ok().headers(headers).body(content);
     }
 
-    private TaskQueueItemDto toQueueDto(TestTaskEntity e) {
-        return TaskQueueItemDto.builder()
-                .taskId(e.getId())
-                .status(e.getStatus().name())
-                .testTool(e.getTestTool())
-                .testFileName(e.getTestFileName())
-                .summarizerName(e.getSummarizerName())
-                .dockerExecutionProfileId(e.getDockerExecutionProfileId())
-                .dockerProfileName(resolveProfileName(e.getDockerExecutionProfileId()))
-                .createdAt(e.getCreatedAt())
-                .build();
+    private enum SummarizerValidationContext {
+        RERUN, SUMMARIZE
     }
 
-    private String resolveProfileName(java.util.UUID profileId) {
+    private static Map<String, Object> paginatedResponse(List<?> items, int page, int size, Page<?> p) {
+        return Map.of(
+                ApiJsonKeys.ITEMS, items,
+                ApiJsonKeys.PAGE, page,
+                ApiJsonKeys.SIZE, size,
+                ApiJsonKeys.TOTAL_ELEMENTS, p.getTotalElements(),
+                ApiJsonKeys.TOTAL_PAGES, p.getTotalPages());
+    }
+
+    private ResponseEntity<Map<String, String>> validateSummarizerRoute(
+            SummarizerModelEntity route,
+            String summarizerName,
+            SummarizerValidationContext context) {
+        if (route == null) {
+            return ResponseEntity.badRequest().body(ResponseHelper.messageBody(SummarizerRouteMessages.routeNotFound(summarizerName)));
+        }
+        if (!Boolean.TRUE.equals(route.getEnabled())) {
+            String disabledMessage = context == SummarizerValidationContext.RERUN
+                    ? SummarizerRouteMessages.ROUTE_DISABLED_RERUN
+                    : SummarizerRouteMessages.ROUTE_DISABLED_SUMMARIZE;
+            return ResponseEntity.badRequest().body(ResponseHelper.messageBody(disabledMessage));
+        }
+        if (SummarizerProviders.EXTERNAL.equalsIgnoreCase(route.getProvider())
+                && (route.getBaseUrl() == null || route.getBaseUrl().isBlank())) {
+            String missingUrlMessage = context == SummarizerValidationContext.RERUN
+                    ? SummarizerRouteMessages.EXTERNAL_BASE_URL_MISSING_RERUN
+                    : SummarizerRouteMessages.EXTERNAL_BASE_URL_MISSING_SUMMARIZE;
+            return ResponseEntity.badRequest().body(ResponseHelper.messageBody(missingUrlMessage));
+        }
+        return null;
+    }
+
+    private TaskQueueItemDto toQueueDto(TestTaskEntity e) {
+        return new TaskQueueItemDto(
+                e.getId(),
+                e.getStatus().name(),
+                e.getTestTool(),
+                e.getTestFileName(),
+                e.getSummarizerName(),
+                e.getDockerExecutionProfileId(),
+                resolveProfileName(e.getDockerExecutionProfileId()),
+                e.getCreatedAt());
+    }
+
+    private String resolveProfileName(UUID profileId) {
         if (profileId == null) {
             return null;
         }
@@ -362,29 +393,28 @@ public class TasksController {
         if (e.getTestFileContentBase64() != null && !e.getTestFileContentBase64().isEmpty()) {
             try {
                 fileContent = new String(Base64.getDecoder().decode(e.getTestFileContentBase64()), StandardCharsets.UTF_8);
-            } catch (Exception ex) {
+            } catch (RuntimeException ex) {
                 log.warn("Failed to decode test file content for task {}", e.getId(), ex);
             }
         }
-        return TaskHistoryItemDto.builder()
-                .id(e.getId())
-                .finalStatus(e.getFinalStatus())
-                .testTool(e.getTestTool())
-                .testFileName(e.getTestFileName())
-                .summarizerName(e.getSummarizerName())
-                .command(e.getCommand())
-                .createdAt(e.getCreatedAt())
-                .startedAt(e.getStartedAt())
-                .finishedAt(e.getFinishedAt())
-                .errorMessage(e.getErrorMessage())
-                .fileContent(fileContent)
-                .metricsConfig(e.getMetricsConfig())
-                .metricsCollected(e.getMetricsConfig() != null && !e.getMetricsConfig().isBlank())
-                .dockerProfileName(e.getDockerProfileName())
-                .build();
+        return new TaskHistoryItemDto(
+                e.getId(),
+                e.getFinalStatus(),
+                e.getTestTool(),
+                e.getTestFileName(),
+                e.getSummarizerName(),
+                e.getCommand(),
+                e.getCreatedAt(),
+                e.getStartedAt(),
+                e.getFinishedAt(),
+                e.getErrorMessage(),
+                e.getMetricsConfig() != null && !e.getMetricsConfig().isBlank(),
+                fileContent,
+                e.getMetricsConfig(),
+                e.getDockerProfileName());
     }
 
-    private static byte[] decompressGzip(byte[] gzip) throws Exception {
+    private static byte[] decompressGzip(byte[] gzip) throws IOException {
         try (GZIPInputStream gis = new GZIPInputStream(new ByteArrayInputStream(gzip));
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             byte[] buf = new byte[8192];
@@ -401,44 +431,51 @@ public class TasksController {
         if (e.getMetricsData() != null && !e.getMetricsData().isBlank()) {
             try {
                 metricsData = objectMapper.readValue(e.getMetricsData(), Object.class);
-            } catch (Exception ex) {
+            } catch (JsonProcessingException ex) {
                 metricsData = e.getMetricsData();
             }
         }
-        return MetricsItemDto.builder()
-                .id(e.getId())
-                .sourceType(e.getSourceType())
-                .endpointUrl(e.getEndpointUrl())
-                .queryParams(e.getQueryParams())
-                .metricsData(metricsData)
-                .collectedAt(e.getCollectedAt())
-                .build();
+        return new MetricsItemDto(
+                e.getId(),
+                e.getSourceType(),
+                e.getEndpointUrl(),
+                e.getQueryParams(),
+                metricsData,
+                e.getCollectedAt());
     }
 
     private SummaryItemDto toSummaryDto(TestSummaryEntity e) {
-        Object summaryData = null;
-        if (e.getSummaryData() != null && !e.getSummaryData().isBlank()) {
-            try {
-                summaryData = objectMapper.readValue(e.getSummaryData(), Object.class);
-                if (summaryData instanceof String s && !s.isBlank()) {
-                    try {
-                        summaryData = objectMapper.readValue(s, Object.class);
-                    } catch (Exception ignored) {
-                    }
-                }
-            } catch (Exception ex) {
-                summaryData = e.getSummaryData();
-            }
+        Object summaryData = parseSummaryDataField(e.getSummaryData());
+        return new SummaryItemDto(
+                e.getId(),
+                e.getTaskId(),
+                e.getSummaryType(),
+                summaryData,
+                e.getProcessingStatus(),
+                e.getErrorMessage(),
+                e.getProcessedAt());
+    }
+
+    private Object parseSummaryDataField(String summaryDataJson) {
+        if (summaryDataJson == null || summaryDataJson.isBlank()) {
+            return null;
         }
-        return SummaryItemDto.builder()
-                .id(e.getId())
-                .taskId(e.getTaskId())
-                .summaryType(e.getSummaryType())
-                .summaryData(summaryData)
-                .processingStatus(e.getProcessingStatus())
-                .errorMessage(e.getErrorMessage())
-                .processedAt(e.getProcessedAt())
-                .build();
+        try {
+            return unwrapDoubleEncodedJsonString(objectMapper.readValue(summaryDataJson, Object.class));
+        } catch (JsonProcessingException ex) {
+            return summaryDataJson;
+        }
+    }
+
+    private Object unwrapDoubleEncodedJsonString(Object parsed) {
+        if (!(parsed instanceof String s) || s.isBlank()) {
+            return parsed;
+        }
+        try {
+            return objectMapper.readValue(s, Object.class);
+        } catch (JsonProcessingException ex) {
+            return parsed;
+        }
     }
 
     private static String contentTypeFromFileName(String fileName) {

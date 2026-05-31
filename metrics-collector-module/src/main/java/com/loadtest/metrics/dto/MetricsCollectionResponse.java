@@ -1,41 +1,16 @@
 package com.loadtest.metrics.dto;
 
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-
 import java.util.Map;
 
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
-public class MetricsCollectionResponse {
+public record MetricsCollectionResponse(
+        String taskId,
+        String status,
+        String message,
+        Map<String, Object> metrics,
+        SummaryResult summary,
+        Long collectionStartTime,
+        Long collectionEndTime) {
 
-    private String taskId;
-
-    private String status; // SUCCESS, FAILED, PARTIAL
-
-    private String message;
-
-    private Map<String, Object> metrics;
-
-    private SummaryResult summary;
-
-    private Long collectionStartTime;
-
-    private Long collectionEndTime;
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class SummaryResult {
-        private String status; // SUCCESS, FAILED, NOT_ENABLED
-        private String summary;
-        private Map<String, Object> details;
+    public record SummaryResult(String status, String summary, Map<String, Object> details) {
     }
 }
-
-

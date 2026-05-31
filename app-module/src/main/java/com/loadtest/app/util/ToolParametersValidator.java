@@ -1,12 +1,12 @@
 package com.loadtest.app.util;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -20,7 +20,7 @@ public class ToolParametersValidator {
             "testFileHostPath", "reportsHostPath", "metricsHostPath"
     );
 
-    private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("\\{(\\w+)\\}");
+    private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("\\{(\\w+)}");
 
     private final ObjectMapper objectMapper;
 
@@ -55,7 +55,7 @@ public class ToolParametersValidator {
                 return "Missing parameters for placeholders in command: " + String.join(", ", missing);
             }
             return null;
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             log.debug("toolParameters parse error", e);
             return "Invalid toolParameters JSON: " + e.getMessage();
         }

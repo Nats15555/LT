@@ -13,11 +13,13 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.junit.jupiter.SpringExtension;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static com.loadtest.app.testsupport.JsonTestSupport.readTree;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -41,14 +43,14 @@ class MetricsConfigSchemaValidatorTest {
     private ObjectMapper objectMapper;
 
     @Test
-    void validate_acceptsMinimalValidConfig() throws Exception {
-        JsonNode node = objectMapper.readTree("{\"requests\":[{\"url\":\"http://localhost:9090/metrics\"}]}");
+    void validate_acceptsMinimalValidConfig() {
+        JsonNode node = readTree(objectMapper, "{\"requests\":[{\"url\":\"http://localhost:9090/metrics\"}]}");
         assertThatCode(() -> validator.validate(node)).doesNotThrowAnyException();
     }
 
     @Test
-    void validate_rejectsInvalidConfig() throws Exception {
-        JsonNode node = objectMapper.readTree("{\"requests\":[]}");
+    void validate_rejectsInvalidConfig() {
+        JsonNode node = readTree(objectMapper, "{\"requests\":[]}");
         assertThatThrownBy(() -> validator.validate(node))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("requests");
@@ -67,13 +69,13 @@ class MetricsConfigSchemaValidatorTest {
     }
 
     @Test
-    void loadSchema_successPath_coversTryWithResources() throws Exception {
+    void loadSchema_successPath_coversTryWithResources() {
         MetricsConfigSchemaValidator fresh = new MetricsConfigSchemaValidator();
         ReflectionTestUtils.invokeMethod(fresh, "loadSchema");
-        JsonNode ok = objectMapper.readTree("{\"requests\":[{\"url\":\"http://localhost:9090/metrics\"}]}");
+        JsonNode ok = readTree(objectMapper, "{\"requests\":[{\"url\":\"http://localhost:9090/metrics\"}]}");
         assertThatCode(() -> fresh.validate(ok)).doesNotThrowAnyException();
 
-        JsonNode bad = objectMapper.readTree("{\"requests\":[]}");
+        JsonNode bad = readTree(objectMapper, "{\"requests\":[]}");
         assertThatThrownBy(() -> fresh.validate(bad)).isInstanceOf(IllegalArgumentException.class);
         assertThat(ReflectionTestUtils.getField(fresh, "jsonSchema")).isNotNull();
     }
@@ -82,7 +84,7 @@ class MetricsConfigSchemaValidatorTest {
     void loadSchema_throwsWhenCloseFails_afterSchemaRead() {
         String minimalSchema = "{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\"}";
         byte[] schemaBytes = minimalSchema.getBytes(StandardCharsets.UTF_8);
-        InputStream brokenClose = new java.io.ByteArrayInputStream(schemaBytes) {
+        InputStream brokenClose = new ByteArrayInputStream(schemaBytes) {
             @Override
             public void close() throws IOException {
                 super.close();
@@ -135,7 +137,7 @@ class MetricsConfigSchemaValidatorTest {
         String minimalSchema = "{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\"}";
         byte[] schemaBytes = minimalSchema.getBytes(StandardCharsets.UTF_8);
         AtomicBoolean closed = new AtomicBoolean(false);
-        InputStream tracked = new java.io.ByteArrayInputStream(schemaBytes) {
+        InputStream tracked = new ByteArrayInputStream(schemaBytes) {
             @Override
             public void close() throws IOException {
                 closed.set(true);

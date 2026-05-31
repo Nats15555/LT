@@ -19,14 +19,14 @@ public class TestTaskConsumer {
 
     @KafkaListener(topics = "${kafka.topic.test-tasks:test-tasks}", groupId = "${spring.kafka.consumer.group-id}")
     public void consumeTestTaskEvent(TestTaskEvent event, Acknowledgment acknowledgment) {
-        log.info("Received test task event: taskId={}", event.getTaskId());
+        log.info("Received test task event: taskId={}", event.taskId());
         try {
             TestTaskRunResult result = testTaskExecutionService.execute(event);
             if (result.getKind() == TestTaskRunResult.Kind.COMPLETED) {
                 triggerMetricsCollectionAfterCompletedRun(result);
             }
-        } catch (Exception e) {
-            log.error("Unexpected error handling test task event taskId={}", event.getTaskId(), e);
+        } catch (RuntimeException e) {
+            log.error("Unexpected error handling test task event taskId={}", event.taskId(), e);
         } finally {
             acknowledgment.acknowledge();
         }
@@ -41,9 +41,9 @@ public class TestTaskConsumer {
         long end = outcome.testEndTimeMillis();
         TestTaskMessage message = result.getMessage();
         boolean parsedRequests = message != null
-                && message.getMetricsConfig() != null
-                && message.getMetricsConfig().getRequests() != null
-                && !message.getMetricsConfig().getRequests().isEmpty();
+                && message.metricsConfig() != null
+                && message.metricsConfig().requests() != null
+                && !message.metricsConfig().requests().isEmpty();
         if (result.hasNonEmptyMetricsRequests() || parsedRequests) {
             metricsTriggerService.triggerMetricsCollectionForTaskId(result.getTaskId().toString(), start, end);
             return;
