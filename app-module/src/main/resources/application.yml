@@ -4,6 +4,10 @@ server:
 spring:
   application:
     name: app-service
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 11MB
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/loadtest}
     username: ${SPRING_DATASOURCE_USERNAME:loadtest}
@@ -27,6 +31,8 @@ kafka:
     summarization-tasks: summarization-tasks
 
 loadtest:
+  upload:
+    max-scenario-file-size-bytes: 10485760
   external-summary:
     window-minutes: 2
   external-llm:

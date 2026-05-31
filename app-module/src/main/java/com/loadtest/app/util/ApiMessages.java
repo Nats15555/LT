@@ -60,6 +60,19 @@ public final class ApiMessages {
                             + "Please ensure the file extension matches one of the supported extensions.",
                     toolName, supportedExtensions, actualExtension);
         }
+
+        public static String fileTooLarge(long actualBytes, long maxBytes) {
+            return String.format(
+                    "File size %d bytes exceeds the maximum allowed scenario size of %d bytes (%s)",
+                    actualBytes, maxBytes, formatBytesForMessage(maxBytes));
+        }
+
+        private static String formatBytesForMessage(long bytes) {
+            if (bytes > 0 && bytes % (1024 * 1024) == 0) {
+                return (bytes / (1024 * 1024)) + " MiB";
+            }
+            return String.format("%.2f MiB", bytes / (1024.0 * 1024.0));
+        }
     }
 
     public static final class DockerProfile {

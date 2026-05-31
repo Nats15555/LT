@@ -1,8 +1,5 @@
 package com.loadtest.app.util;
 
-/**
- * Имена named-параметров для native SQL ({@code :name} в запросе и {@code setParameter(name, …)}).
- */
 public final class NativeQueryParams {
 
     public static final String ID = "id";

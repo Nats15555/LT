@@ -10,8 +10,10 @@ import com.loadtest.app.util.FileValidationHelper;
 import com.loadtest.app.util.MetricsConfigParser;
 import com.loadtest.app.util.ResponseHelper;
 import com.loadtest.app.util.SummarizerProviders;
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -34,6 +36,9 @@ public class LoadTestUploadService {
     private final SummarizerService summarizerService;
     private final DockerExecutionProfileService dockerExecutionProfileService;
     private final CustomSummarizationPromptStore customSummarizationPromptStore;
+
+    @Value("${loadtest.upload.max-scenario-file-size-bytes:10485760}")
+    private long maxScenarioFileSizeBytes;
 
     public ResponseEntity<Map<String, Object>> upload(
             MultipartFile file,
@@ -149,7 +154,7 @@ public class LoadTestUploadService {
         return null;
     }
 
-    private static ResponseEntity<Map<String, Object>> validateUploadedFile(MultipartFile file, LoadTestToolDto toolDto) {
+    private ResponseEntity<Map<String, Object>> validateUploadedFile(MultipartFile file, LoadTestToolDto toolDto) {
         String fileValidationError = FileValidationHelper.validateFile(file);
         if (fileValidationError != null) {
             return ResponseHelper.buildErrorResponse(HttpStatus.BAD_REQUEST, fileValidationError);
@@ -173,12 +178,36 @@ public class LoadTestUploadService {
                             toolDto.name(), allowedExtensionsLabel, fileExtension));
         }
 
+        ResponseEntity<Map<String, Object>> sizeError = validateScenarioFileSize(file);
+        if (sizeError != null) {
+            return sizeError;
+        }
+
         log.info("File extension validated: .{} for tool {}", fileExtension, toolDto.name());
         return null;
     }
 
-    private static String encodeFileContent(MultipartFile file) throws IOException {
+    private ResponseEntity<Map<String, Object>> validateScenarioFileSize(MultipartFile file) {
+        long declaredSize = FileValidationHelper.resolveDeclaredSizeBytes(file);
+        if (declaredSize >= 0) {
+            if (declaredSize > maxScenarioFileSizeBytes) {
+                return fileTooLargeResponse(declaredSize);
+            }
+            return null;
+        }
+        return null;
+    }
+
+    private ResponseEntity<Map<String, Object>> fileTooLargeResponse(long actualBytes) {
+        return ResponseHelper.buildErrorResponse(HttpStatus.BAD_REQUEST,
+                ApiMessages.Upload.fileTooLarge(actualBytes, maxScenarioFileSizeBytes));
+    }
+
+    private String encodeFileContent(MultipartFile file) throws IOException {
         byte[] fileBytes = file.getBytes();
+        if (fileBytes.length > maxScenarioFileSizeBytes) {
+            throw new ScenarioFileTooLargeException(fileBytes.length, maxScenarioFileSizeBytes);
+        }
         String fileContentBase64 = Base64.getEncoder().encodeToString(fileBytes);
         log.info("File prepared for transmission: {} ({} bytes, Base64: {} chars)",
                 file.getOriginalFilename(), fileBytes.length, fileContentBase64.length());
@@ -245,5 +274,19 @@ public class LoadTestUploadService {
         static MetricsConfigParseResult error(ResponseEntity<Map<String, Object>> error) {
             return new MetricsConfigParseResult(null, error);
         }
+    }
+
+    @Getter
+    public static final class ScenarioFileTooLargeException extends IllegalArgumentException {
+
+        private final long actualBytes;
+        private final long maxBytes;
+
+        public ScenarioFileTooLargeException(long actualBytes, long maxBytes) {
+            super(ApiMessages.Upload.fileTooLarge(actualBytes, maxBytes));
+            this.actualBytes = actualBytes;
+            this.maxBytes = maxBytes;
+        }
+
     }
 }

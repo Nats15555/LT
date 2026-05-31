@@ -58,6 +58,9 @@ public class LoadTestController {
             return loadTestUploadService.upload(
                     file, tool, command, expectedDurationSeconds,
                     metricsConfig, summarizer, customPrompt, dockerExecutionProfileId);
+        } catch (LoadTestUploadService.ScenarioFileTooLargeException e) {
+            log.warn("Scenario file too large for tool {}: {}", tool, e.getMessage());
+            return ResponseHelper.buildErrorResponse(HttpStatus.BAD_REQUEST, e.getMessage());
         } catch (IllegalArgumentException e) {
             log.error("Invalid upload request for tool {}: {}", tool, e.getMessage());
             return ResponseHelper.buildErrorResponse(HttpStatus.BAD_REQUEST,

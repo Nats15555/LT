@@ -22,13 +22,17 @@ public final class FileValidationHelper {
         if (file.isEmpty()) {
             return "File is empty";
         }
-        
+
         String fileName = file.getOriginalFilename();
         if (fileName == null || fileName.trim().isEmpty()) {
             return "File name is required";
         }
-        
+
         return null;
+    }
+
+    public static long resolveDeclaredSizeBytes(MultipartFile file) {
+        return file.getSize();
     }
 }
 

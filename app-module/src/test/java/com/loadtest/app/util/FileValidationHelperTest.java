@@ -43,6 +43,12 @@ class FileValidationHelperTest {
     }
 
     @Test
+    void resolveDeclaredSizeBytes_returnsMultipartLength() {
+        var file = new MockMultipartFile("f", "k6.js", "text/plain", new byte[42]);
+        assertThat(FileValidationHelper.resolveDeclaredSizeBytes(file)).isEqualTo(42);
+    }
+
+    @Test
     void validateFile_rejectsNullFileNameBranch() {
         MultipartFile file = mock(MultipartFile.class);
         when(file.isEmpty()).thenReturn(false);
