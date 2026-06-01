@@ -22,12 +22,15 @@ import static org.mockito.Mockito.when;
 class ExternalSummarizationPendingServiceTest {
 
     private TestSummaryJpaRepository testSummaryJpaRepository;
+    private TaskHistoryLifecycleService taskHistoryLifecycleService;
     private ExternalSummarizationPendingService service;
 
     @BeforeEach
     void setUp() {
         testSummaryJpaRepository = mock(TestSummaryJpaRepository.class);
-        service = new ExternalSummarizationPendingService(testSummaryJpaRepository, new ObjectMapper());
+        taskHistoryLifecycleService = mock(TaskHistoryLifecycleService.class);
+        service = new ExternalSummarizationPendingService(
+                testSummaryJpaRepository, taskHistoryLifecycleService, new ObjectMapper());
         ReflectionTestUtils.setField(service, "windowMinutes", 2);
     }
 
@@ -58,7 +61,8 @@ class ExternalSummarizationPendingServiceTest {
     void registerPendingWindow_jsonFailure_fallback() throws Exception {
         ObjectMapper bad = mock(ObjectMapper.class);
         doThrow(new JsonProcessingException("err") {}).when(bad).writeValueAsString(any());
-        ExternalSummarizationPendingService s2 = new ExternalSummarizationPendingService(testSummaryJpaRepository, bad);
+        ExternalSummarizationPendingService s2 = new ExternalSummarizationPendingService(
+                testSummaryJpaRepository, taskHistoryLifecycleService, bad);
         ReflectionTestUtils.setField(s2, "windowMinutes", 2);
         s2.registerPendingWindow(UUID.randomUUID(), "ext");
         verify(testSummaryJpaRepository).save(any(TestSummaryEntity.class));

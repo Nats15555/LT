@@ -39,13 +39,19 @@ class TestTaskRunResultTest {
                 new ExecutionResponse("ok", null, null, null, null, 1L, null, null),
                 10L,
                 20L);
-        TestTaskRunResult r = TestTaskRunResult.completed(msg, out, true);
+        TestTaskRunResult r = TestTaskRunResult.completed(msg, out, true, false);
         assertThat(r.getKind()).isEqualTo(TestTaskRunResult.Kind.COMPLETED);
         assertThat(r.getMessage()).isSameAs(msg);
         assertThat(r.getOutcome()).isSameAs(out);
         assertThat(r.hasNonEmptyMetricsRequests()).isTrue();
+        assertThat(r.needsPostExecutionPipeline()).isTrue();
 
-        TestTaskRunResult r2 = TestTaskRunResult.completed(msg, out, false);
+        TestTaskRunResult r2 = TestTaskRunResult.completed(msg, out, false, true);
         assertThat(r2.hasNonEmptyMetricsRequests()).isFalse();
+        assertThat(r2.hasConfiguredSummarizer()).isTrue();
+        assertThat(r2.needsPostExecutionPipeline()).isTrue();
+
+        TestTaskRunResult r3 = TestTaskRunResult.completed(msg, out, false, false);
+        assertThat(r3.needsPostExecutionPipeline()).isFalse();
     }
 }

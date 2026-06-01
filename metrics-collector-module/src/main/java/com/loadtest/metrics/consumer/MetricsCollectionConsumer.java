@@ -6,7 +6,8 @@ import com.loadtest.metrics.dto.MetricsCollectionResponse;
 import com.loadtest.metrics.persistence.TestMetricsWriter;
 import com.loadtest.metrics.service.MetricsCollectionRequestBuilder;
 import com.loadtest.metrics.service.MetricsCollectionService;
-import com.loadtest.metrics.service.SummarizationEnqueueService;
+import com.loadtest.metrics.service.PostMetricsPipelineService;
+import com.loadtest.metrics.service.TaskHistoryLifecycleService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -14,6 +15,7 @@ import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
 import java.util.Optional;
+import java.util.UUID;
 
 @Slf4j
 @Component
@@ -23,7 +25,8 @@ public class MetricsCollectionConsumer {
     private final MetricsCollectionRequestBuilder requestBuilder;
     private final MetricsCollectionService metricsCollectionService;
     private final TestMetricsWriter testMetricsWriter;
-    private final SummarizationEnqueueService summarizationEnqueueService;
+    private final PostMetricsPipelineService postMetricsPipelineService;
+    private final TaskHistoryLifecycleService taskHistoryLifecycleService;
 
     @KafkaListener(
             topics = "${kafka.topic.metrics-collection-tasks:metrics-collection-tasks}",
@@ -37,22 +40,23 @@ public class MetricsCollectionConsumer {
         try {
             Optional<MetricsCollectionRequest> requestOpt = requestBuilder.tryBuildFromEvent(event);
             if (requestOpt.isEmpty()) {
-                summarizationEnqueueService.enqueueAfterMetricsSaved(event.taskId());
+                postMetricsPipelineService.finishMetricsPhase(event.taskId(), null, false);
                 acknowledgment.acknowledge();
                 return;
             }
             MetricsCollectionRequest request = requestOpt.get();
+            taskHistoryLifecycleService.markMetricsCollecting(UUID.fromString(event.taskId()));
             MetricsCollectionResponse response = metricsCollectionService.collectMetrics(request);
             int savedRows = testMetricsWriter.saveMetrics(event.taskId(), request, response);
             if (savedRows == 0) {
-                log.warn("No rows written to test_metrics for taskId={} (check HTTP URLs, host-overrides, Prometheus/ES); summarization may still be enqueued if summarizer is set",
+                log.warn("No rows written to test_metrics for taskId={} (check HTTP URLs, host-overrides, Prometheus/ES); post-metrics pipeline will still run",
                         event.taskId());
             }
-            summarizationEnqueueService.enqueueAfterMetricsSaved(event.taskId());
+            postMetricsPipelineService.finishMetricsPhase(event.taskId(), response, true);
             acknowledgment.acknowledge();
         } catch (RuntimeException e) {
             log.error("Error processing metrics collection for taskId: {}", event.taskId(), e);
-            summarizationEnqueueService.enqueueAfterMetricsSaved(event.taskId());
+            postMetricsPipelineService.failMetricsPhase(event.taskId(), e.getMessage());
             acknowledgment.acknowledge();
         }
     }

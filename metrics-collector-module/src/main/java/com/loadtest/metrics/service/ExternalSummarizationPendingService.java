@@ -25,6 +25,7 @@ public class ExternalSummarizationPendingService {
     public static final String PROCESSING_STATUS_AWAITING = "AWAITING_EXTERNAL_CALLBACK";
 
     private final TestSummaryJpaRepository testSummaryJpaRepository;
+    private final TaskHistoryLifecycleService taskHistoryLifecycleService;
     private final ObjectMapper objectMapper;
 
     @Value("${loadtest.external-summary.window-minutes:2}")
@@ -79,6 +80,7 @@ public class ExternalSummarizationPendingService {
             row.setProcessedAt(now);
         }
         testSummaryJpaRepository.saveAll(rows);
+        taskHistoryLifecycleService.markFailed(taskId, msg);
         log.info("Marked external pending window FAILED: taskId={}, message={}", taskId, msg);
     }
 }

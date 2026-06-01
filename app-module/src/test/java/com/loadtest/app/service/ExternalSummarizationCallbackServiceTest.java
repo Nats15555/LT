@@ -50,6 +50,8 @@ class ExternalSummarizationCallbackServiceTest {
     private TestMetricsRepository metricsRepository;
     @Mock
     private TestSummaryRepository summaryRepository;
+    @Mock
+    private TaskHistoryLifecycleService taskHistoryLifecycleService;
 
     private ExternalSummarizationCallbackService service;
 
@@ -64,7 +66,8 @@ class ExternalSummarizationCallbackServiceTest {
                 metricsRepository,
                 summaryRepository,
                 objectMapper,
-                customSummarizationPromptStore);
+                customSummarizationPromptStore,
+                taskHistoryLifecycleService);
         ReflectionTestUtils.setField(service, "windowMinutes", 5);
     }
 
@@ -81,7 +84,7 @@ class ExternalSummarizationCallbackServiceTest {
         ObjectMapper badOm = mock(ObjectMapper.class);
         stubWriteValueAsStringFailure(badOm, new JsonProcessingException("x") {});
         ExternalSummarizationCallbackService s2 = new ExternalSummarizationCallbackService(
-                historyRepository, summarizerModelRepository, artifactRepository, metricsRepository, summaryRepository, badOm, new CustomSummarizationPromptStore());
+                historyRepository, summarizerModelRepository, artifactRepository, metricsRepository, summaryRepository, badOm, new CustomSummarizationPromptStore(), taskHistoryLifecycleService);
         ReflectionTestUtils.setField(s2, "windowMinutes", 1);
         s2.registerPendingWindow(UUID.randomUUID(), "ext");
         verify(summaryRepository).save(any(TestSummaryEntity.class));
@@ -375,7 +378,7 @@ class ExternalSummarizationCallbackServiceTest {
         ObjectMapper badOm = mock(ObjectMapper.class);
         stubWriteValueAsStringFailure(badOm, new JsonProcessingException("ser") {});
         ExternalSummarizationCallbackService s2 = new ExternalSummarizationCallbackService(
-                historyRepository, summarizerModelRepository, artifactRepository, metricsRepository, summaryRepository, badOm, new CustomSummarizationPromptStore());
+                historyRepository, summarizerModelRepository, artifactRepository, metricsRepository, summaryRepository, badOm, new CustomSummarizationPromptStore(), taskHistoryLifecycleService);
 
         UUID taskId = UUID.randomUUID();
         OffsetDateTime t = OffsetDateTime.now(ZoneOffset.UTC);

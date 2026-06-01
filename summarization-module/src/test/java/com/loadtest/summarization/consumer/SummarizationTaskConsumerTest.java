@@ -7,6 +7,7 @@ import com.loadtest.summarization.persistence.TaskHistoryRepository;
 import com.loadtest.summarization.persistence.TestSummaryWriter;
 import com.loadtest.summarization.service.OpenAiCompatibleClient;
 import com.loadtest.summarization.service.PromptBuilder;
+import com.loadtest.summarization.service.TaskHistoryLifecycleService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -35,6 +36,7 @@ class SummarizationTaskConsumerTest {
     @Mock private PromptBuilder promptBuilder;
     @Mock private OpenAiCompatibleClient llmClient;
     @Mock private TestSummaryWriter testSummaryWriter;
+    @Mock private TaskHistoryLifecycleService taskHistoryLifecycleService;
     @Mock private Acknowledgment acknowledgment;
 
     private SummarizationTaskConsumer consumer;
@@ -46,7 +48,8 @@ class SummarizationTaskConsumerTest {
                 summarizerModelRepository,
                 promptBuilder,
                 llmClient,
-                testSummaryWriter
+                testSummaryWriter,
+                taskHistoryLifecycleService
         );
     }
 

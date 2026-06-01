@@ -46,7 +46,7 @@ class TestTaskConsumerTest {
         ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 1L, null, null);
         TaskProcessOutcome outcome = new TaskProcessOutcome(resp, 10L, 20L);
         when(testTaskExecutionService.execute(any()))
-                .thenReturn(TestTaskRunResult.completed(msg, outcome, false));
+                .thenReturn(TestTaskRunResult.completed(msg, outcome, false, false));
 
         consumer.consumeTestTaskEvent(new TestTaskEvent(taskId.toString()), acknowledgment);
 
@@ -61,7 +61,7 @@ class TestTaskConsumerTest {
         ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 1L, null, null);
         TaskProcessOutcome outcome = new TaskProcessOutcome(resp, 5L, 6L);
         when(testTaskExecutionService.execute(any()))
-                .thenReturn(TestTaskRunResult.completed(msg, outcome, true));
+                .thenReturn(TestTaskRunResult.completed(msg, outcome, true, false));
 
         consumer.consumeTestTaskEvent(new TestTaskEvent(taskId.toString()), acknowledgment);
 
@@ -76,7 +76,7 @@ class TestTaskConsumerTest {
         ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 1L, null, null);
         TaskProcessOutcome outcome = new TaskProcessOutcome(resp, 1L, 2L);
         when(testTaskExecutionService.execute(any()))
-                .thenReturn(TestTaskRunResult.completed(msg, outcome, false));
+                .thenReturn(TestTaskRunResult.completed(msg, outcome, false, false));
 
         consumer.consumeTestTaskEvent(new TestTaskEvent(taskId.toString()), acknowledgment);
 
@@ -93,7 +93,6 @@ class TestTaskConsumerTest {
         when(result.getKind()).thenReturn(TestTaskRunResult.Kind.COMPLETED);
         when(result.getOutcome()).thenReturn(outcome);
         when(result.getMessage()).thenReturn(null);
-        when(result.hasNonEmptyMetricsRequests()).thenReturn(false);
         when(result.getTaskId()).thenReturn(taskId);
         when(testTaskExecutionService.execute(any())).thenReturn(result);
 
@@ -112,7 +111,7 @@ class TestTaskConsumerTest {
         ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 1L, null, null);
         TaskProcessOutcome outcome = new TaskProcessOutcome(resp, 3L, 4L);
         when(testTaskExecutionService.execute(any()))
-                .thenReturn(TestTaskRunResult.completed(msg, outcome, false));
+                .thenReturn(TestTaskRunResult.completed(msg, outcome, false, false));
 
         consumer.consumeTestTaskEvent(new TestTaskEvent(taskId.toString()), acknowledgment);
 

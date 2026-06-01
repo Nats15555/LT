@@ -32,6 +32,10 @@ kafka:
     test-tasks: test-tasks
     metrics-collection-tasks: metrics-collection-tasks
 
+loadtest:
+  summarization:
+    default-summarizer-name: ${LOADTEST_DEFAULT_SUMMARIZER_NAME:}
+
 file:
   storage:
     upload-dir: uploads

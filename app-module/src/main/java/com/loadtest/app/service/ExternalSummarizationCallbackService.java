@@ -16,6 +16,7 @@ import com.loadtest.app.persistence.TestTaskHistoryRepository;
 import com.loadtest.app.util.ApiJsonKeys;
 import com.loadtest.app.util.ApiMessages;
 import com.loadtest.app.util.SummarizerProviders;
+import com.loadtest.app.util.TaskLifecycleStatus;
 import com.loadtest.app.util.TestSummaryConstants;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -51,25 +52,26 @@ public class ExternalSummarizationCallbackService {
     private final TestSummaryRepository summaryRepository;
     private final ObjectMapper objectMapper;
     private final CustomSummarizationPromptStore customSummarizationPromptStore;
+    private final TaskHistoryLifecycleService taskHistoryLifecycleService;
 
     @Value("${loadtest.external-summary.window-minutes:2}")
     private int windowMinutes;
 
     @Transactional
-    public void registerPendingWindow(UUID taskId, String summarizerName) {
-        OffsetDateTime deadline = OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(windowMinutes);
-        String instructionsRu =
-                "В течение " + windowMinutes + " мин вызовите GET /api/v1/loadtest/history/" + taskId
-                        + "/external-llm/package, затем POST /api/v1/loadtest/history/" + taskId
-                        + "/external-llm/summary с телом {\"text\":\"...\"}.";
-        Map<String, Object> summaryData = Map.of(
-                ApiJsonKeys.MODE, MODE_EXTERNAL_CALLBACK,
-                ApiJsonKeys.DEADLINE_AT, deadline.toString(),
-                ApiJsonKeys.SUMMARIZER_NAME, summarizerName,
-                ApiJsonKeys.WINDOW_MINUTES, windowMinutes,
-                ApiJsonKeys.INSTRUCTIONS_RU, instructionsRu);
+    public void ensureExternalSummarizationStarted(UUID taskId) {
+        HistoryAndSummarizer hs = requireHistoryAndSummarizer(taskId);
+        openPendingWindow(taskId, hs.summarizerName());
+    }
 
-        String summaryDataJson = serializeSummaryDataOrEmpty(summaryData);
+    @Transactional
+    public void registerPendingWindow(UUID taskId, String summarizerName) {
+        openPendingWindow(taskId, summarizerName);
+    }
+
+    private void openPendingWindow(UUID taskId, String summarizerName) {
+        OffsetDateTime deadline = OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(windowMinutes);
+        String summaryDataJson = serializeSummaryDataOrEmpty(
+                buildPendingWindowSummaryData(taskId, summarizerName, deadline));
 
         summaryRepository.deleteByTaskIdAndProcessingStatus(taskId, PROCESSING_STATUS_AWAITING);
 
@@ -84,6 +86,7 @@ public class ExternalSummarizationCallbackService {
                 .createdAt(now)
                 .processedAt(null)
                 .build());
+        taskHistoryLifecycleService.updateStatus(taskId, TaskLifecycleStatus.ANALYZING, null);
         log.info("Opened external summarization window: taskId={}, summarizer={}, deadline={}", taskId, summarizerName, deadline);
     }
 
@@ -155,6 +158,7 @@ public class ExternalSummarizationCallbackService {
                 .processedAt(now)
                 .build();
         summaryRepository.save(completed);
+        taskHistoryLifecycleService.markCompleted(taskId);
         log.info("External summarization report saved: taskId={}", taskId);
     }
 
@@ -165,15 +169,20 @@ public class ExternalSummarizationCallbackService {
         if (pendingRows.isEmpty()) {
             return;
         }
+        String failMsg = message != null && !message.isBlank() ? message : TestSummaryConstants.STATUS_FAILED;
         for (TestSummaryEntity row : pendingRows) {
-            markPendingFailed(row, message != null && !message.isBlank() ? message : TestSummaryConstants.STATUS_FAILED);
+            markPendingFailed(row, failMsg);
         }
+        taskHistoryLifecycleService.markFailed(taskId, failMsg);
+    }
+
+    private record HistoryAndSummarizer(TestTaskHistoryEntity history, String summarizerName) {
     }
 
     private record ExternalRunContext(TestTaskHistoryEntity history, SummarizerModelEntity model, String summarizerName) {
     }
 
-    private ExternalRunContext requireExternalRunContext(UUID taskId, boolean kafkaSummarizationHint) {
+    private HistoryAndSummarizer requireHistoryAndSummarizer(UUID taskId) {
         TestTaskHistoryEntity history = historyRepository.findById(taskId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                         ApiMessages.ExternalSummarization.RUN_NOT_FOUND));
@@ -182,7 +191,12 @@ public class ExternalSummarizationCallbackService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     ApiMessages.ExternalSummarization.SUMMARIZER_NAME_MISSING);
         }
-        SummarizerModelEntity model = summarizerModelRepository.findByName(summarizerName.trim())
+        return new HistoryAndSummarizer(history, summarizerName.trim());
+    }
+
+    private ExternalRunContext requireExternalRunContext(UUID taskId, boolean kafkaSummarizationHint) {
+        HistoryAndSummarizer hs = requireHistoryAndSummarizer(taskId);
+        SummarizerModelEntity model = summarizerModelRepository.findByName(hs.summarizerName())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
                         ApiMessages.ExternalSummarization.LLM_ROUTE_NOT_FOUND));
         if (!SummarizerProviders.EXTERNAL.equalsIgnoreCase(model.getProvider())) {
@@ -191,7 +205,7 @@ public class ExternalSummarizationCallbackService {
                     : ApiMessages.ExternalSummarization.ROUTE_NOT_EXTERNAL;
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
         }
-        return new ExternalRunContext(history, model, summarizerName.trim());
+        return new ExternalRunContext(hs.history(), model, hs.summarizerName());
     }
 
     private TestSummaryEntity requireActivePendingWindow(UUID taskId, String notFoundMessage) {
@@ -206,6 +220,20 @@ public class ExternalSummarizationCallbackService {
             markPendingFailed(pending, ApiMessages.ExternalSummarization.WINDOW_EXPIRED);
             throw new ResponseStatusException(HttpStatus.GONE, ApiMessages.ExternalSummarization.CALLBACK_WINDOW_EXPIRED);
         }
+    }
+
+    private Map<String, Object> buildPendingWindowSummaryData(
+            UUID taskId, String summarizerName, OffsetDateTime deadline) {
+        String instructionsRu =
+                "В течение " + windowMinutes + " мин вызовите GET /api/v1/loadtest/history/" + taskId
+                        + "/external-llm/package, затем POST /api/v1/loadtest/history/" + taskId
+                        + "/external-llm/summary с телом {\"text\":\"...\"}.";
+        return Map.of(
+                ApiJsonKeys.MODE, MODE_EXTERNAL_CALLBACK,
+                ApiJsonKeys.DEADLINE_AT, deadline.toString(),
+                ApiJsonKeys.SUMMARIZER_NAME, summarizerName,
+                ApiJsonKeys.WINDOW_MINUTES, windowMinutes,
+                ApiJsonKeys.INSTRUCTIONS_RU, instructionsRu);
     }
 
     private String serializeSummaryDataOrEmpty(Map<String, Object> summaryData) {

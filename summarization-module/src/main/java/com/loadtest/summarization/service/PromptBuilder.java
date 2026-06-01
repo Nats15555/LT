@@ -6,6 +6,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -17,43 +20,16 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class PromptBuilder {
 
+    private static final String PROMPT_TEMPLATE_RESOURCE =
+            "prompts/standard-summarization-prompt-template.txt";
+
+    private static final String PROMPT_TEMPLATE = loadPromptTemplate();
+
     private static final String EMPTY_DATA_MESSAGE =
             "Нет артефактов и метрик для суммаризации по данной задаче.";
 
     private static final int MAX_ARTIFACT_TEXT_CHARS = 25_000;
     private static final int MAX_METRICS_JSON_CHARS = 15_000;
-
-    private static final String MANDATORY_INSTRUCTION = """
-            Задача: отчёт по результатам нагрузочного теста. Используй ТОЛЬКО блок «Исходные данные» ниже (все файлы и все строки метрик). ФОРМАТ ОТВЕТА — СТРОГИЙ: начинай сразу с первой секции «## Краткое содержание»; не пиши преамбул («конечно», «ниже отчёт»). Разрешены РОВНО пять секций с заголовками ## именно в таком порядке и без пропусков: «## Краткое содержание», «## Плюсы», «## Минусы», «## Предложения», «## Итог». Не добавляй другие секции уровня ## (ни «Ключевые метрики», ни «Рекомендации» отдельно — цифры и рекомендации вписывай в Плюсы/Минусы/Предложения/Итог). В «## Плюсы» и «## Минусы» — маркированные списки (- …), каждый пункт с привязкой к факту из логов/метрик (число, процент, имя метрики, файл). В «## Предложения» — нумерованный список (1. 2. 3.) из конкретных шагов (что изменить в коде, конфиге, лимитах, сценарии нагрузки). В «## Итог» — 3–5 предложений: стоит ли выпускать в прод, главный риск, что проверить повторно. Если по блоку нет данных — одна строка: «Нет данных». Запрещено отказываться от отчёта или писать, что вопросы не требуют ответа. Напиши отчёт сейчас.
-
-            """;
-
-    private static final String REPORT_TEMPLATE = """
-            Строго соблюдай заголовки и порядок секций (ровно как ниже, на русском, с ## и переносами строк):
-
-            ## Краткое содержание
-            [2–4 предложения: цель прогона, общий вывод pass/fail, ключевые цифры если есть в данных]
-
-            ## Плюсы
-            [Только маркеры «- ». Что прошло хорошо: стабильность, запас по задержкам, RPS, отсутствие ошибок — с цифрами из артефактов/метрик. Нет плюсов — строка «- Нет данных»]
-
-            ## Минусы
-            [Только маркеры «- ». Риски и слабые места: ошибки, рост задержек, провалы RPS, аномалии в JSON метрик — с цифрами/ссылкой на источник. Нет минусов — «- Не выявлено» или «- Нет данных»]
-
-            ## Предложения
-            [Только нумерация «1. » «2. » … Конкретные действия: что поменять в тесте, в приложении, в инфраструктуре, какие пороги мониторинга задать]
-
-            ## Итог
-            [Связный текст 3–5 предложений: приемлем ли результат для продакшена, главный риск, что повторить в следующем прогоне]
-
-            Не дублируй заголовки секций внутри текста; не выводи сырой JSON целиком — только выжимка для читателя.""";
-
-    private static final String SOURCE_DATA_HEADER = """
-
-
-            --- Исходные данные ---
-
-            """;
 
     private static final DateTimeFormatter METRICS_TIME_FMT =
             DateTimeFormatter.ISO_LOCAL_DATE_TIME.withZone(ZoneId.systemDefault());
@@ -70,7 +46,19 @@ public class PromptBuilder {
         }
         logPromptBuild(taskId, artifacts, metrics);
         String sourceData = buildSourceDataSection(artifacts, metrics);
-        return MANDATORY_INSTRUCTION + REPORT_TEMPLATE + SOURCE_DATA_HEADER + sourceData;
+        return PROMPT_TEMPLATE + sourceData;
+    }
+
+    private static String loadPromptTemplate() {
+        InputStream in = PromptBuilder.class.getClassLoader().getResourceAsStream(PROMPT_TEMPLATE_RESOURCE);
+        if (in == null) {
+            throw new IllegalStateException("Classpath resource not found: " + PROMPT_TEMPLATE_RESOURCE);
+        }
+        try (in) {
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to read resource: " + PROMPT_TEMPLATE_RESOURCE, e);
+        }
     }
 
     private void logPromptBuild(

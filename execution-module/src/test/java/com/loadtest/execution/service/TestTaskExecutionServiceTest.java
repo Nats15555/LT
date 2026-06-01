@@ -153,8 +153,11 @@ class TestTaskExecutionServiceTest {
         TestTaskRunResult r = service.execute(new TestTaskEvent(taskId.toString()));
 
         assertThat(r.getKind()).isEqualTo(TestTaskRunResult.Kind.COMPLETED);
-        verify(taskRepository).save(any(TestTaskEntity.class));
-        verify(historyRepository, org.mockito.Mockito.atLeastOnce()).save(any(TestTaskHistoryEntity.class));
+        verify(taskRepository, never()).save(any(TestTaskEntity.class));
+        ArgumentCaptor<TestTaskHistoryEntity> historyCaptor = ArgumentCaptor.forClass(TestTaskHistoryEntity.class);
+        verify(historyRepository, org.mockito.Mockito.atLeastOnce()).save(historyCaptor.capture());
+        assertThat(historyCaptor.getAllValues().stream().map(TestTaskHistoryEntity::getFinalStatus))
+                .contains("COMPLETED");
         verify(taskRepository).delete(any(TestTaskEntity.class));
     }
 
@@ -366,12 +369,19 @@ class TestTaskExecutionServiceTest {
         when(processor.process(any(TestTaskMessage.class)))
                 .thenReturn(new TaskProcessOutcome(resp, 100L, 200L));
 
-        doThrow(new RuntimeException("status-save-fail")).when(taskRepository).save(any(TestTaskEntity.class));
+        org.mockito.Mockito.doAnswer(invocation -> {
+            TestTaskHistoryEntity h = invocation.getArgument(0);
+            if (h.getFinalStatus() != null && !"PROCESSING".equals(h.getFinalStatus())) {
+                throw new RuntimeException("history-save-fail");
+            }
+            return h;
+        }).when(historyRepository).save(any(TestTaskHistoryEntity.class));
 
         TestTaskRunResult r = service.execute(new TestTaskEvent(taskId.toString()));
 
         assertThat(r.getKind()).isEqualTo(TestTaskRunResult.Kind.COMPLETED);
-        verify(taskRepository, org.mockito.Mockito.atLeastOnce()).save(any(TestTaskEntity.class));
+        verify(taskRepository, never()).save(any(TestTaskEntity.class));
+        verify(historyRepository, org.mockito.Mockito.atLeastOnce()).save(any(TestTaskHistoryEntity.class));
     }
 
     @Test
@@ -1441,7 +1451,7 @@ class TestTaskExecutionServiceTest {
         TestTaskRunResult r = service.execute(new TestTaskEvent(taskId.toString()));
 
         assertThat(r.getKind()).isEqualTo(TestTaskRunResult.Kind.COMPLETED);
-        verify(taskRepository).save(any(TestTaskEntity.class));
+        verify(taskRepository, never()).save(any(TestTaskEntity.class));
         verify(taskRepository, never()).delete(any(TestTaskEntity.class));
     }
 

@@ -44,11 +44,19 @@ public class TestTaskConsumer {
                 && message.metricsConfig() != null
                 && message.metricsConfig().requests() != null
                 && !message.metricsConfig().requests().isEmpty();
-        if (result.hasNonEmptyMetricsRequests() || parsedRequests) {
+        boolean needsPipeline = result.needsPostExecutionPipeline() || parsedRequests;
+        if (!needsPipeline) {
+            log.info("No post-execution pipeline for taskId={} (terminal COMPLETED, no metrics or summarizer)",
+                    result.getTaskId());
+            return;
+        }
+        boolean triggerMetricsKafka = result.hasNonEmptyMetricsRequests() || parsedRequests
+                || result.hasConfiguredSummarizer();
+        if (triggerMetricsKafka) {
             metricsTriggerService.triggerMetricsCollectionForTaskId(result.getTaskId().toString(), start, end);
             return;
         }
-        log.info("No metrics collection Kafka event for taskId={} (no non-empty metrics_config.requests and no parsed requests)",
+        log.info("No metrics-collection Kafka event for taskId={} (unexpected: post-execution pipeline was required)",
                 result.getTaskId());
     }
 }

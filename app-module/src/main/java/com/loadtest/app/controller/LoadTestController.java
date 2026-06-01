@@ -5,7 +5,6 @@ import com.loadtest.app.util.ApiJsonKeys;
 import com.loadtest.app.util.ApiMessages;
 import com.loadtest.app.util.ClasspathResources;
 import com.loadtest.app.util.ResponseHelper;
-import com.loadtest.app.util.StandardSummarizationPromptPreview;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
@@ -37,7 +36,8 @@ public class LoadTestController {
     @GetMapping(value = "/standard-summarization-prompt-template", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<Map<String, Object>> getStandardSummarizationPromptTemplate() {
         return ResponseEntity.ok(Map.of(
-                ApiJsonKeys.TEMPLATE, StandardSummarizationPromptPreview.previewText(),
+                ApiJsonKeys.TEMPLATE,
+                ClasspathResources.readUtf8(ClasspathResources.STANDARD_SUMMARIZATION_PROMPT_TEMPLATE),
                 ApiJsonKeys.DESCRIPTION, ApiMessages.PromptTemplate.DESCRIPTION
         ));
     }

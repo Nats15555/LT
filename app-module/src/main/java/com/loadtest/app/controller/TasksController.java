@@ -37,7 +37,6 @@ import com.loadtest.app.util.SummarizerProviders;
 import com.loadtest.app.util.SummarizerRouteMessages;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -78,8 +77,6 @@ public class TasksController {
     private final TestQueueService testQueueService;
     private final QueuePauseService queuePauseService;
     private final ObjectMapper objectMapper;
-    @Value("${kafka.topic.summarization-tasks:summarization-tasks}")
-    private String summarizationTasksTopic;
 
     @GetMapping("/queue/pause")
     public Map<String, Object> getQueuePause() {
@@ -283,6 +280,7 @@ public class TasksController {
 
     @PostMapping("/history/{taskId}/external-llm/dispatch")
     public Map<String, Object> dispatchExternalLlmPackage(@PathVariable UUID taskId) {
+        externalSummarizationCallbackService.ensureExternalSummarizationStarted(taskId);
         return externalLlmDispatchService.dispatchPackage(taskId);
     }
 

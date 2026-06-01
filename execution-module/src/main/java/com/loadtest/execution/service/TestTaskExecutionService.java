@@ -13,9 +13,11 @@ import com.loadtest.execution.persistence.TestTaskHistoryEntity;
 import com.loadtest.execution.persistence.TestTaskHistoryRepository;
 import com.loadtest.execution.persistence.TestTaskRepository;
 import com.loadtest.execution.persistence.TestTaskStatus;
+import com.loadtest.execution.util.TaskLifecycleStatus;
 import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,10 +32,12 @@ import java.util.UUID;
 public class TestTaskExecutionService {
 
     private static final int DOCKER_SLOT_WAIT_MS = 2000;
-    private static final String STATUS_PROCESSING = TestTaskStatus.PROCESSING.name();
-    private static final String STATUS_COMPLETED = TestTaskStatus.COMPLETED.name();
-    private static final String STATUS_FAILED = TestTaskStatus.FAILED.name();
-    private static final String STATUS_PENDING = TestTaskStatus.PENDING.name();
+    private static final String STATUS_PROCESSING = TaskLifecycleStatus.PROCESSING;
+    private static final String STATUS_FAILED = TaskLifecycleStatus.FAILED;
+    private static final String STATUS_PENDING = TaskLifecycleStatus.PENDING;
+
+    @Value("${loadtest.summarization.default-summarizer-name:}")
+    private String defaultSummarizerName;
 
     private final TestTaskRepository taskRepository;
     private final TestTaskHistoryRepository historyRepository;
@@ -73,6 +77,7 @@ public class TestTaskExecutionService {
                 .orElseThrow(() -> new IllegalStateException("Task not found after update: " + taskId));
 
         boolean hasNonEmptyMetricsRequests = hasNonEmptyMetricsRequestsJson(task.getMetricsConfig());
+        boolean hasConfiguredSummarizer = hasConfiguredSummarizer(task);
 
         log.info("Successfully claimed task {} for processing", taskId);
 
@@ -88,28 +93,43 @@ public class TestTaskExecutionService {
         try {
             message = toMessage(task);
             processOutcome = processor.process(message);
-            finalStatus = STATUS_COMPLETED;
+            finalStatus = resolveSuccessHistoryStatus(hasNonEmptyMetricsRequests, hasConfiguredSummarizer);
         } catch (RuntimeException e) {
             finalStatus = STATUS_FAILED;
             errorMessage = e.getMessage();
             log.error("Task {} failed", taskId, e);
         } finally {
-            finishedAt = OffsetDateTime.now();
+            finishedAt = TaskLifecycleStatus.isTerminal(finalStatus) ? OffsetDateTime.now() : null;
             persistTaskOutcomeAndHistory(taskId, finalStatus, errorMessage, finishedAt);
         }
 
-        if (STATUS_COMPLETED.equals(finalStatus) && processOutcome != null) {
-            return TestTaskRunResult.completed(message, processOutcome, hasNonEmptyMetricsRequests);
+        if (processOutcome != null && !STATUS_FAILED.equals(finalStatus)) {
+            return TestTaskRunResult.completed(message, processOutcome, hasNonEmptyMetricsRequests,
+                    hasConfiguredSummarizer);
         }
         return TestTaskRunResult.failed(taskId);
+    }
+
+    private String resolveSuccessHistoryStatus(boolean hasMetrics, boolean hasSummarizer) {
+        if (!hasMetrics && !hasSummarizer) {
+            return TaskLifecycleStatus.COMPLETED;
+        }
+        return TaskLifecycleStatus.PROCESSING;
+    }
+
+    private boolean hasConfiguredSummarizer(TestTaskEntity task) {
+        if (task.getSummarizerName() != null && !task.getSummarizerName().isBlank()) {
+            return true;
+        }
+        return defaultSummarizerName != null && !defaultSummarizerName.isBlank();
     }
 
     private void persistTaskOutcomeAndHistory(
             UUID taskId, String finalStatus, String errorMessage, OffsetDateTime finishedAt) {
         try {
             TestTaskEntity taskForUpdate = taskRepository.findById(taskId).orElse(null);
-            if (taskForUpdate != null) {
-                taskForUpdate.setStatus(TestTaskStatus.valueOf(finalStatus));
+            if (taskForUpdate != null && STATUS_FAILED.equals(finalStatus)) {
+                taskForUpdate.setStatus(TestTaskStatus.FAILED);
                 taskForUpdate.setErrorMessage(errorMessage);
                 taskForUpdate.setUpdatedAt(OffsetDateTime.now());
                 taskRepository.save(taskForUpdate);
