@@ -203,7 +203,11 @@
         fd.append('customPrompt', p);
       }
       const dps = document.getElementById('dockerProfileSelect');
-      if (dps && dps.value) fd.append('dockerExecutionProfileId', dps.value);
+      if (!dps || !dps.value) {
+        msgEl.innerHTML = '<div class="msg err">Выберите Docker-профиль.</div>';
+        return;
+      }
+      fd.append('dockerExecutionProfileId', dps.value);
 
       msgEl.innerHTML = '<div class="msg">Отправка…</div>';
       try {

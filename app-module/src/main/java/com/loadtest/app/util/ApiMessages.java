@@ -22,6 +22,8 @@ public final class ApiMessages {
         public static final String COMMAND_REQUIRED = "Command is required";
         public static final String EXPECTED_DURATION_REQUIRED =
                 "expectedDurationSeconds is required and must be at least 1";
+        public static final String DOCKER_EXECUTION_PROFILE_ID_REQUIRED =
+                "dockerExecutionProfileId is required";
         public static final String INVALID_METRICS_CONFIG_PREFIX = "Invalid metrics configuration: ";
         public static final String INVALID_TOOL_PREFIX = "Invalid tool: ";
         public static final String FAILED_UPLOAD_PREFIX = "Failed to upload file: ";

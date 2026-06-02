@@ -44,6 +44,20 @@ class DockerExecutionProfileServiceTest {
     }
 
     @Test
+    void resolveProfileIdForUpload_requiredWhenNull() {
+        assertThatThrownBy(() -> service.resolveProfileIdForUpload(null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("dockerExecutionProfileId is required");
+    }
+
+    @Test
+    void resolveProfileIdForUpload_requiredWhenBlank() {
+        assertThatThrownBy(() -> service.resolveProfileIdForUpload("   "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("dockerExecutionProfileId is required");
+    }
+
+    @Test
     void resolveProfileIdForUpload_parsesUuidAndChecksEnabled() {
         UUID id = UUID.randomUUID();
         DockerExecutionProfileEntity e = DockerExecutionProfileEntity.builder().id(id).enabled(true).build();
@@ -75,34 +89,6 @@ class DockerExecutionProfileServiceTest {
         assertThatThrownBy(() -> service.resolveProfileIdForUpload(id.toString()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("disabled");
-    }
-
-    @Test
-    void resolveProfileIdForUpload_defaultFromNameThenAny() {
-        UUID defId = UUID.randomUUID();
-        when(repository.findFirstByNameAndEnabledTrue(DockerExecutionProfileService.DEFAULT_PROFILE_NAME))
-                .thenReturn(Optional.of(DockerExecutionProfileEntity.builder().id(defId).build()));
-        assertThat(service.resolveProfileIdForUpload(null)).isEqualTo(defId);
-    }
-
-    @Test
-    void resolveProfileIdForUpload_fallbackEnabled() {
-        UUID anyId = UUID.randomUUID();
-        when(repository.findFirstByNameAndEnabledTrue(DockerExecutionProfileService.DEFAULT_PROFILE_NAME))
-                .thenReturn(Optional.empty());
-        when(repository.findFirstByEnabledTrueOrderByCreatedAtAsc())
-                .thenReturn(Optional.of(DockerExecutionProfileEntity.builder().id(anyId).build()));
-        assertThat(service.resolveProfileIdForUpload("")).isEqualTo(anyId);
-    }
-
-    @Test
-    void resolveProfileIdForUpload_noProfiles() {
-        when(repository.findFirstByNameAndEnabledTrue(DockerExecutionProfileService.DEFAULT_PROFILE_NAME))
-                .thenReturn(Optional.empty());
-        when(repository.findFirstByEnabledTrueOrderByCreatedAtAsc()).thenReturn(Optional.empty());
-        assertThatThrownBy(() -> service.resolveProfileIdForUpload(null))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("No docker execution profile");
     }
 
     @Test

@@ -38,6 +38,8 @@ import static com.loadtest.app.testsupport.MockMvcTestSupport.perform;
 @Import(LoadTestUploadService.class)
 class LoadTestControllerWebMvcTest {
 
+    private static final UUID TEST_PROFILE_ID = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -68,7 +70,8 @@ class LoadTestControllerWebMvcTest {
                         .file(file)
                         .param("tool", "K6")
                         .param("command", "   ")
-                        .param("expectedDurationSeconds", "10"))
+                        .param("expectedDurationSeconds", "10")
+                        .param("dockerExecutionProfileId", TEST_PROFILE_ID.toString()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.status").value("error"));
     }
@@ -80,7 +83,8 @@ class LoadTestControllerWebMvcTest {
                         .file(file)
                         .param("tool", "K6")
                         .param("command", "run")
-                        .param("expectedDurationSeconds", "0"))
+                        .param("expectedDurationSeconds", "0")
+                        .param("dockerExecutionProfileId", TEST_PROFILE_ID.toString()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("at least 1")));
     }
@@ -89,7 +93,7 @@ class LoadTestControllerWebMvcTest {
     void upload_acceptsMinimalRequest() {
         when(loadTestToolService.getToolByName("K6")).thenReturn(k6Tool());
         UUID profileId = UUID.randomUUID();
-        when(dockerExecutionProfileService.resolveProfileIdForUpload(isNull())).thenReturn(profileId);
+        when(dockerExecutionProfileService.resolveProfileIdForUpload(TEST_PROFILE_ID.toString())).thenReturn(profileId);
         when(testQueueService.enqueueTest(
                         eq("K6"),
                         eq("load.js"),
@@ -107,7 +111,8 @@ class LoadTestControllerWebMvcTest {
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "k6 run {fileName}")
-                        .param("expectedDurationSeconds", "30"))
+                        .param("expectedDurationSeconds", "30")
+                        .param("dockerExecutionProfileId", TEST_PROFILE_ID.toString()))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.taskId").value("new-task-id"))
                 .andExpect(jsonPath("$.status").value("success"));
@@ -121,7 +126,8 @@ class LoadTestControllerWebMvcTest {
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "run")
-                        .param("expectedDurationSeconds", "5"))
+                        .param("expectedDurationSeconds", "5")
+                        .param("dockerExecutionProfileId", TEST_PROFILE_ID.toString()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("not found")));
         verifyNoInteractions(testQueueService);
@@ -136,7 +142,8 @@ class LoadTestControllerWebMvcTest {
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "run")
-                        .param("expectedDurationSeconds", "5"))
+                        .param("expectedDurationSeconds", "5")
+                        .param("dockerExecutionProfileId", TEST_PROFILE_ID.toString()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("disabled")));
     }
@@ -151,7 +158,8 @@ class LoadTestControllerWebMvcTest {
                         .param("tool", "k6")
                         .param("command", "run")
                         .param("expectedDurationSeconds", "5")
-                        .param("summarizer", "missing"))
+                        .param("summarizer", "missing")
+                        .param("dockerExecutionProfileId", TEST_PROFILE_ID.toString()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("not found")));
     }
@@ -159,7 +167,7 @@ class LoadTestControllerWebMvcTest {
     @Test
     void upload_invalidMetricsJson() {
         stubEnabledK6Tool();
-        when(dockerExecutionProfileService.resolveProfileIdForUpload(isNull())).thenReturn(UUID.randomUUID());
+        when(dockerExecutionProfileService.resolveProfileIdForUpload(TEST_PROFILE_ID.toString())).thenReturn(UUID.randomUUID());
         when(metricsConfigParser.parseMetricsConfigRequests(anyString())).thenThrow(new IllegalArgumentException("bad"));
         var file = new MockMultipartFile("file", "x.js", "application/octet-stream", "c".getBytes());
         perform(mockMvc, multipart("/api/v1/loadtest/upload")
@@ -167,7 +175,8 @@ class LoadTestControllerWebMvcTest {
                         .param("tool", "k6")
                         .param("command", "run")
                         .param("expectedDurationSeconds", "5")
-                        .param("metricsConfig", "{}"))
+                        .param("metricsConfig", "{}")
+                        .param("dockerExecutionProfileId", TEST_PROFILE_ID.toString()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("Invalid metrics")));
         verifyNoInteractions(testQueueService);
@@ -176,7 +185,7 @@ class LoadTestControllerWebMvcTest {
     @Test
     void upload_metricsConfigParsedWithNullRequests_stillAccepted() {
         stubEnabledK6Tool();
-        when(dockerExecutionProfileService.resolveProfileIdForUpload(isNull())).thenReturn(UUID.randomUUID());
+        when(dockerExecutionProfileService.resolveProfileIdForUpload(TEST_PROFILE_ID.toString())).thenReturn(UUID.randomUUID());
         when(metricsConfigParser.parseMetricsConfigRequests(anyString()))
                 .thenReturn(new com.loadtest.app.dto.TestTaskMessage.MetricsConfig(1, null));
         when(testQueueService.enqueueTest(
@@ -196,7 +205,8 @@ class LoadTestControllerWebMvcTest {
                         .param("tool", "k6")
                         .param("command", "run")
                         .param("expectedDurationSeconds", "5")
-                        .param("metricsConfig", "{\"delaySeconds\":1}"))
+                        .param("metricsConfig", "{\"delaySeconds\":1}")
+                        .param("dockerExecutionProfileId", TEST_PROFILE_ID.toString()))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.taskId").value("tid-m"));
     }
@@ -209,7 +219,8 @@ class LoadTestControllerWebMvcTest {
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "run")
-                        .param("expectedDurationSeconds", "5"))
+                        .param("expectedDurationSeconds", "5")
+                        .param("dockerExecutionProfileId", TEST_PROFILE_ID.toString()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("must have an extension")));
     }
@@ -222,7 +233,8 @@ class LoadTestControllerWebMvcTest {
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "run")
-                        .param("expectedDurationSeconds", "5"))
+                        .param("expectedDurationSeconds", "5")
+                        .param("dockerExecutionProfileId", TEST_PROFILE_ID.toString()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("extension mismatch")));
     }
@@ -238,7 +250,8 @@ class LoadTestControllerWebMvcTest {
                         .param("tool", "k6")
                         .param("command", "run")
                         .param("expectedDurationSeconds", "5")
-                        .param("summarizer", "route"))
+                        .param("summarizer", "route")
+                        .param("dockerExecutionProfileId", TEST_PROFILE_ID.toString()))
                 .andExpect(status().isBadRequest());
 
         when(summarizerService.getByName("route")).thenReturn(new SummarizerModelDto(
@@ -248,9 +261,23 @@ class LoadTestControllerWebMvcTest {
                         .param("tool", "k6")
                         .param("command", "run")
                         .param("expectedDurationSeconds", "5")
-                        .param("summarizer", "route"))
+                        .param("summarizer", "route")
+                        .param("dockerExecutionProfileId", TEST_PROFILE_ID.toString()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("http://")));
+    }
+
+    @Test
+    void upload_rejectsMissingDockerProfile() {
+        stubEnabledK6Tool();
+        var file = new MockMultipartFile("file", "x.js", "application/octet-stream", "c".getBytes());
+        perform(mockMvc, multipart("/api/v1/loadtest/upload")
+                        .file(file)
+                        .param("tool", "k6")
+                        .param("command", "run")
+                        .param("expectedDurationSeconds", "5"))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(testQueueService);
     }
 
     @Test
@@ -264,7 +291,8 @@ class LoadTestControllerWebMvcTest {
                         .param("tool", "k6")
                         .param("command", "run")
                         .param("expectedDurationSeconds", "5")
-                        .param("summarizer", "route"))
+                        .param("summarizer", "route")
+                        .param("dockerExecutionProfileId", TEST_PROFILE_ID.toString()))
                 .andExpect(status().isBadRequest());
     }
 
@@ -279,7 +307,8 @@ class LoadTestControllerWebMvcTest {
                         .param("tool", "k6")
                         .param("command", "run")
                         .param("expectedDurationSeconds", "5")
-                        .param("summarizer", "route"))
+                        .param("summarizer", "route")
+                        .param("dockerExecutionProfileId", TEST_PROFILE_ID.toString()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("EXTERNAL требует полный URL")));
     }
@@ -287,13 +316,14 @@ class LoadTestControllerWebMvcTest {
     @Test
     void upload_returns500OnUnexpectedException() {
         stubEnabledK6Tool();
-        when(dockerExecutionProfileService.resolveProfileIdForUpload(isNull())).thenThrow(new RuntimeException("boom"));
+        when(dockerExecutionProfileService.resolveProfileIdForUpload(TEST_PROFILE_ID.toString())).thenThrow(new RuntimeException("boom"));
         var file = new MockMultipartFile("file", "x.js", "application/octet-stream", "c".getBytes());
         perform(mockMvc, multipart("/api/v1/loadtest/upload")
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "run")
-                        .param("expectedDurationSeconds", "5"))
+                        .param("expectedDurationSeconds", "5")
+                        .param("dockerExecutionProfileId", TEST_PROFILE_ID.toString()))
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("Failed to upload file")));
     }
@@ -301,7 +331,7 @@ class LoadTestControllerWebMvcTest {
     @Test
     void upload_returns400OnIllegalArgumentException() {
         stubEnabledK6Tool();
-        when(dockerExecutionProfileService.resolveProfileIdForUpload(isNull())).thenReturn(UUID.randomUUID());
+        when(dockerExecutionProfileService.resolveProfileIdForUpload(TEST_PROFILE_ID.toString())).thenReturn(UUID.randomUUID());
         when(testQueueService.enqueueTest(
                 eq("K6"), eq("x.js"), anyString(), eq("run"), eq(5),
                 isNull(), isNull(), isNull(), any(UUID.class)))
@@ -311,7 +341,8 @@ class LoadTestControllerWebMvcTest {
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "run")
-                        .param("expectedDurationSeconds", "5"))
+                        .param("expectedDurationSeconds", "5")
+                        .param("dockerExecutionProfileId", TEST_PROFILE_ID.toString()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("Invalid tool")));
     }
@@ -324,7 +355,8 @@ class LoadTestControllerWebMvcTest {
                         .file(file)
                         .param("tool", "k6")
                         .param("command", "run")
-                        .param("expectedDurationSeconds", "5"))
+                        .param("expectedDurationSeconds", "5")
+                        .param("dockerExecutionProfileId", TEST_PROFILE_ID.toString()))
                 .andExpect(status().isBadRequest());
         verifyNoInteractions(testQueueService);
     }
@@ -335,7 +367,7 @@ class LoadTestControllerWebMvcTest {
         when(summarizerService.getByName("route")).thenReturn(new SummarizerModelDto(
                 UUID.randomUUID(), "route", "OPENAI", null, "m", null, true, OffsetDateTime.MIN, OffsetDateTime.MIN));
         UUID profileId = UUID.randomUUID();
-        when(dockerExecutionProfileService.resolveProfileIdForUpload(isNull())).thenReturn(profileId);
+        when(dockerExecutionProfileService.resolveProfileIdForUpload(TEST_PROFILE_ID.toString())).thenReturn(profileId);
         when(testQueueService.enqueueTest(
                         eq("K6"),
                         eq("x.js"),
@@ -354,7 +386,8 @@ class LoadTestControllerWebMvcTest {
                         .param("tool", "k6")
                         .param("command", "run")
                         .param("expectedDurationSeconds", "5")
-                        .param("summarizer", "route"))
+                        .param("summarizer", "route")
+                        .param("dockerExecutionProfileId", TEST_PROFILE_ID.toString()))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.taskId").value("tid"));
     }

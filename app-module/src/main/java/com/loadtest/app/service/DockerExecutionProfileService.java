@@ -30,26 +30,23 @@ public class DockerExecutionProfileService {
     private final QueuePauseService queuePauseService;
 
     public UUID resolveProfileIdForUpload(String dockerExecutionProfileIdParam) {
-        if (dockerExecutionProfileIdParam != null && !dockerExecutionProfileIdParam.isBlank()) {
-            UUID id;
-            try {
-                id = UUID.fromString(dockerExecutionProfileIdParam.trim());
-            } catch (IllegalArgumentException ex) {
-                throw new IllegalArgumentException(
-                        ApiMessages.DockerProfile.invalidDockerExecutionProfileId(dockerExecutionProfileIdParam));
-            }
-            DockerExecutionProfileEntity p = repository.findById(id)
-                    .orElseThrow(() -> new IllegalArgumentException(
-                            ApiMessages.DockerProfile.dockerExecutionProfileIdNotFound(id)));
-            if (!p.isEnabled()) {
-                throw new IllegalArgumentException(ApiMessages.DockerProfile.dockerProfileDisabled(id));
-            }
-            return id;
+        if (dockerExecutionProfileIdParam == null || dockerExecutionProfileIdParam.isBlank()) {
+            throw new IllegalArgumentException(ApiMessages.Upload.DOCKER_EXECUTION_PROFILE_ID_REQUIRED);
         }
-        return repository.findFirstByNameAndEnabledTrue(DEFAULT_PROFILE_NAME)
-                .or(repository::findFirstByEnabledTrueOrderByCreatedAtAsc)
-                .map(DockerExecutionProfileEntity::getId)
-                .orElseThrow(() -> new IllegalStateException(ApiMessages.DockerProfile.NO_PROFILE_IN_DATABASE));
+        UUID id;
+        try {
+            id = UUID.fromString(dockerExecutionProfileIdParam.trim());
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException(
+                    ApiMessages.DockerProfile.invalidDockerExecutionProfileId(dockerExecutionProfileIdParam));
+        }
+        DockerExecutionProfileEntity p = repository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        ApiMessages.DockerProfile.dockerExecutionProfileIdNotFound(id)));
+        if (!p.isEnabled()) {
+            throw new IllegalArgumentException(ApiMessages.DockerProfile.dockerProfileDisabled(id));
+        }
+        return id;
     }
 
     @Transactional(readOnly = true)

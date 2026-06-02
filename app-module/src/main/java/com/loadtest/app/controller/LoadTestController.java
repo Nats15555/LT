@@ -51,8 +51,7 @@ public class LoadTestController {
             @RequestParam(value = "metricsConfig", required = false) String metricsConfig,
             @RequestParam(value = "summarizer", required = false) String summarizer,
             @RequestParam(value = "customPrompt", required = false) String customPrompt,
-            @RequestParam(value = "dockerExecutionProfileId", required = false) String dockerExecutionProfileId) {
-
+            @RequestParam("dockerExecutionProfileId") String dockerExecutionProfileId) {
         log.info("Uploading test file: {}, tool: {}", file.getOriginalFilename(), tool);
         try {
             return loadTestUploadService.upload(
