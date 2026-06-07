@@ -1,4 +1,4 @@
-﻿    async function loadHistory(forceReload = false) {
+    async function loadHistory(forceReload = false) {
       const el = document.getElementById('historyTable');
       const pageInfoEl = document.getElementById('historyPageInfo');
       const prevBtn = document.getElementById('historyPrevPage');
@@ -66,10 +66,10 @@
           const taskId = t.id;
           return `
             <tr class="history-row" data-task-id="${taskId}" style="cursor:pointer">
-              <td>${esc(t.finalStatus)}</td>
+              <td>${esc(taskStatusLabel(t.finalStatus))}</td>
               <td>${esc(t.testTool)}</td>
               <td>${esc(t.testFileName)}</td>
-              <td class="meta">${t.dockerProfileName ? esc(t.dockerProfileName) : '—'}</td>
+              <td class="meta">${t.dockerProfileName ? esc(dockerProfileDisplayName(t.dockerProfileName)) : '—'}</td>
               <td class="meta">${t.summarizerName ? esc(t.summarizerName) + summarizerRouteBadgeHtml(t.summarizerName) : '—'}</td>
               <td class="meta" title="${esc(t.command || '')}">${truncateCmd(t.command)}</td>
               <td>${t.metricsCollected ? 'да' : 'нет'}</td>
@@ -78,7 +78,7 @@
               <td class="actions-cell"><button type="button" class="btn btn-small btn-danger btn-delete-history" data-task-id="${taskId}">Удалить</button></td>
             </tr>`;
         }).join('');
-        el.innerHTML = `<table><thead><tr><th>Статус</th><th>Инструмент</th><th>Файл</th><th>Docker</th><th>Маршрут LLM</th><th>Команда</th><th>Метрики</th><th>Создан</th><th>Завершён</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+        el.innerHTML = `<table><thead><tr><th>Статус</th><th>Инструмент</th><th>Файл</th><th>Профиль</th><th>Маршрут отчёта</th><th>Команда</th><th>Метрики</th><th>Создан</th><th>Завершён</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
         el.querySelectorAll('.history-row').forEach(tr => {
           tr.addEventListener('click', (ev) => {
             if (ev.target.closest && ev.target.closest('button.btn-delete-history')) return;
@@ -90,7 +90,7 @@
             ev.preventDefault();
             ev.stopPropagation();
             const id = this.getAttribute('data-task-id');
-            if (!id || !confirm('Удалить этот прогон из истории? Артефакты, метрики и отчёты LLM будут удалены безвозвратно.')) return;
+            if (!id || !confirm('Удалить этот прогон из истории? Артефакты, метрики и отчёты суммаризации будут удалены безвозвратно.')) return;
             try {
               const r = await fetch(API + '/history/' + id, { method: 'DELETE' });
               if (r.status === 204 || r.ok) {
@@ -243,7 +243,7 @@
           const ext = parseExternalPendingData(s.summaryData);
           const dlLine = ext.deadlineAt ? '<p class="meta"><strong>До:</strong> ' + escapeHtml(ext.deadlineAt) + '</p>' : '';
           const api = '<p class="meta"><code>GET ' + escapeHtml(API) + '/history/' + escapeHtml(taskId) + '/external-llm/package</code><br><code>POST ' + escapeHtml(API) + '/history/' + escapeHtml(taskId) + '/external-llm/summary</code> с JSON <code>{"text":"…"}</code></p>';
-          summaryBlockHtml = '<div class="block-card summary-card"><h2 class="block-card-title">Внешняя LLM <span class="meta">AWAITING_EXTERNAL_CALLBACK</span></h2><div class="block-card-body"><p>Окно открыто: заберите метрики и артефакты, затем загрузите текст отчёта.</p>' + dlLine + (ext.instructionsRu ? '<p class="meta">' + escapeHtml(ext.instructionsRu) + '</p>' : '') + api + '</div></div>';
+          summaryBlockHtml = '<div class="block-card summary-card"><h2 class="block-card-title">Внешний отчёт <span class="meta">' + escapeHtml(taskStatusLabel('AWAITING_EXTERNAL_CALLBACK')) + '</span></h2><div class="block-card-body"><p>Окно открыто: заберите метрики и артефакты, затем загрузите текст отчёта.</p>' + dlLine + (ext.instructionsRu ? '<p class="meta">' + escapeHtml(ext.instructionsRu) + '</p>' : '') + api + '</div></div>';
         } else if (summaryList.length > 0) {
           const s = summaryList[0];
           const status = s.processingStatus || '—';
@@ -252,13 +252,13 @@
           const promptHtml = norm.promptUsed && norm.promptUsed.trim()
             ? '<details style="margin-top:0.75rem"><summary>Промпт суммаризации</summary><pre style="margin-top:0.5rem;max-height:12rem;overflow:auto">' + escapeHtml(norm.promptUsed) + '</pre></details>'
             : '';
-          summaryBlockHtml = '<div class="block-card summary-card"><h2 class="block-card-title">Отчёт суммаризации <span class="meta">' + escapeHtml(status) + '</span></h2><div class="block-card-body">' + err + '<p class="meta">' + (status === 'PENDING' || status === 'PROCESSING' ? 'В обработке…' : 'Нет готового отчёта') + '</p>' + promptHtml + '</div></div>';
+          summaryBlockHtml = '<div class="block-card summary-card"><h2 class="block-card-title">Отчёт суммаризации <span class="meta">' + escapeHtml(taskStatusLabel(status)) + '</span></h2><div class="block-card-body">' + err + '<p class="meta">' + (status === 'PENDING' || status === 'PROCESSING' ? 'В обработке…' : 'Нет готового отчёта') + '</p>' + promptHtml + '</div></div>';
         } else {
-          summaryBlockHtml = '<div class="block-card summary-card"><h2 class="block-card-title">Отчёт суммаризации</h2><div class="block-card-body"><p class="meta">Нет отчёта по этой задаче (LiteLLM или внешний маршрут).</p></div></div>';
+          summaryBlockHtml = '<div class="block-card summary-card"><h2 class="block-card-title">Отчёт суммаризации</h2><div class="block-card-body"><p class="meta">Нет отчёта по этой задаче (встроенный или внешний маршрут).</p></div></div>';
         }
         const actionsBlockHtml = '<div class="block-card"><h2 class="block-card-title">Действия</h2><div class="block-card-body"><select class="summarizer-select-detail history-action-field"><option value="">— как в этом прогоне —</option></select><textarea class="custom-prompt-detail history-action-field" rows="4" placeholder="Промпт (необязательно)"></textarea><button type="button" class="btn btn-rerun-detail" data-task-id="' + taskId + '">Перезапустить тест</button> <span class="rerun-detail-msg"></span><br><br><button type="button" class="btn btn-small btn-request-summarize-detail" data-task-id="' + taskId + '">Перезапросить отчёт</button> <span class="summarize-detail-msg" style="margin-left:0.5rem"></span><br><br><button type="button" class="btn btn-small btn-danger btn-delete-history-detail" data-task-id="' + taskId + '">Удалить прогон из истории</button> <span class="delete-history-detail-msg"></span></div></div>';
         container.innerHTML =
-          '<div class="block-card"><h2 class="block-card-title">Прогон ' + escapeHtml(taskId) + '</h2><div class="block-card-body"><p><strong>Статус:</strong> ' + escapeHtml(hist.finalStatus || '—') + ' &nbsp; <strong>Инструмент:</strong> ' + escapeHtml(hist.testTool || '—') + ' &nbsp; <strong>Маршрут LLM:</strong> ' + (hist.summarizerName ? escapeHtml(hist.summarizerName) + summarizerRouteBadgeHtml(hist.summarizerName) : '—') + ' &nbsp; <strong>Создан:</strong> ' + formatDate(hist.createdAt) + ' &nbsp; <strong>Завершён:</strong> ' + formatDate(hist.finishedAt) + '</p></div></div>' +
+          '<div class="block-card"><h2 class="block-card-title">Прогон ' + escapeHtml(taskId) + '</h2><div class="block-card-body"><p><strong>Статус:</strong> ' + escapeHtml(taskStatusLabel(hist.finalStatus) || '—') + ' &nbsp; <strong>Инструмент:</strong> ' + escapeHtml(hist.testTool || '—') + ' &nbsp; <strong>Маршрут отчёта:</strong> ' + (hist.summarizerName ? escapeHtml(hist.summarizerName) + summarizerRouteBadgeHtml(hist.summarizerName) : '—') + ' &nbsp; <strong>Создан:</strong> ' + formatDate(hist.createdAt) + ' &nbsp; <strong>Завершён:</strong> ' + formatDate(hist.finishedAt) + '</p></div></div>' +
           actionsBlockHtml +
           '<div class="block-card"><h2 class="block-card-title">Параметры запуска</h2><div class="block-card-body"><p><strong>Команда</strong></p><pre>' + escapeHtml(cmd) + '</pre><p style="margin-top:1rem"><strong>Файл теста</strong> ' + escapeHtml(fileName) + '</p><details style="margin-top:0.5rem"><summary>Содержимое файла</summary><pre style="margin-top:0.5rem">' + escapeHtml(fileContent) + '</pre></details><details style="margin-top:0.5rem"><summary>Конфиг метрик</summary><pre style="margin-top:0.5rem">' + escapeHtml(metricsConfigStr) + '</pre></details></div></div>' +
           summaryBlockHtml +
@@ -345,7 +345,7 @@
         if (deleteHistDetailBtn && deleteHistDetailMsg) {
           deleteHistDetailBtn.addEventListener('click', async function () {
             const id = this.getAttribute('data-task-id');
-            if (!id || !confirm('Удалить этот прогон из истории? Артефакты, метрики и отчёты LLM будут удалены безвозвратно.')) return;
+            if (!id || !confirm('Удалить этот прогон из истории? Артефакты, метрики и отчёты суммаризации будут удалены безвозвратно.')) return;
             this.disabled = true;
             deleteHistDetailMsg.textContent = '…';
             deleteHistDetailMsg.className = '';
@@ -463,9 +463,9 @@
                     const ext = parseExternalPendingData(s.summaryData);
                     const dl = ext.deadlineAt ? `<p class="meta"><strong>До:</strong> ${escapeHtml(ext.deadlineAt)}</p>` : '';
                     const api = `<p class="meta"><code>GET ${escapeHtml(API)}/history/${escapeHtml(taskId)}/external-llm/package</code><br><code>POST ${escapeHtml(API)}/history/${escapeHtml(taskId)}/external-llm/summary</code> JSON <code>{"text":"…"}</code></p>`;
-                    return `<div class="copy-block summary-block"><h4>Внешняя LLM <span class="meta">AWAITING_EXTERNAL_CALLBACK</span></h4>${ext.instructionsRu ? `<p class="meta">${escapeHtml(ext.instructionsRu)}</p>` : ''}${dl}${api}</div>`;
+                    return `<div class="copy-block summary-block"><h4>Внешний отчёт <span class="meta">${escapeHtml(taskStatusLabel('AWAITING_EXTERNAL_CALLBACK'))}</span></h4>${ext.instructionsRu ? `<p class="meta">${escapeHtml(ext.instructionsRu)}</p>` : ''}${dl}${api}</div>`;
                   }
-                  return `<div class="copy-block summary-block"><h4>Отчёт суммаризации <span class="meta">${escapeHtml(meta || status)}</span></h4><p class="meta">${status === 'PENDING' || status === 'PROCESSING' ? 'В обработке…' : status}</p></div>`;
+                  return `<div class="copy-block summary-block"><h4>Отчёт суммаризации <span class="meta">${escapeHtml(taskStatusLabel(meta || status))}</span></h4><p class="meta">${status === 'PENDING' || status === 'PROCESSING' ? 'В обработке…' : escapeHtml(taskStatusLabel(status))}</p></div>`;
                 }).join('')
               : '<div class="meta">Нет отчёта по этой задаче</div>';
             const summarySectionId = 'summary-section-' + taskId;
@@ -480,7 +480,7 @@
               <div class="copy-block"><h4>Файл теста<button type="button" class="btn-copy btn btn-small">Копировать</button></h4><pre>${escapeHtml(fileName)}</pre></div>
               <div class="copy-block"><h4>Содержимое файла<button type="button" class="btn-copy btn btn-small">Копировать</button></h4><pre>${escapeHtml(fileContent)}</pre></div>
               <div class="copy-block"><h4>Конфиг метрик<button type="button" class="btn-copy btn btn-small">Копировать</button></h4><pre>${escapeHtml(metricsConfigStr)}</pre></div>
-              <h4>Отчёт суммаризации <span class="meta">(LiteLLM через summarization-service или внешний маршрут)</span></h4>
+              <h4>Отчёт суммаризации <span class="meta">(встроенный сервис или внешний маршрут)</span></h4>
               <div id="${summarySectionId}" class="summary-section-wrap">${summaryHtml}</div>
               <div id="${summaryActionsId}" class="summary-actions" style="margin-top:0.5rem;">
                 <button type="button" class="btn btn-small btn-request-summarize" data-task-id="${taskId}">Перезапросить отчёт</button>
@@ -562,9 +562,9 @@
                   const ext = parseExternalPendingData(s.summaryData);
                   const dl = ext.deadlineAt ? '<p class="meta"><strong>До:</strong> ' + escapeHtml(ext.deadlineAt) + '</p>' : '';
                   const api = '<p class="meta"><code>GET ' + escapeHtml(API) + '/history/' + escapeHtml(taskId) + '/external-llm/package</code><br><code>POST ' + escapeHtml(API) + '/history/' + escapeHtml(taskId) + '/external-llm/summary</code> JSON <code>{"text":"…"}</code></p>';
-                  return '<div class="copy-block summary-block"><h4>Внешняя LLM <span class="meta">AWAITING_EXTERNAL_CALLBACK</span></h4>' + (ext.instructionsRu ? '<p class="meta">' + escapeHtml(ext.instructionsRu) + '</p>' : '') + dl + api + '</div>';
+                  return '<div class="copy-block summary-block"><h4>Внешний отчёт <span class="meta">' + escapeHtml(taskStatusLabel('AWAITING_EXTERNAL_CALLBACK')) + '</span></h4>' + (ext.instructionsRu ? '<p class="meta">' + escapeHtml(ext.instructionsRu) + '</p>' : '') + dl + api + '</div>';
                 }
-                return '<div class="copy-block summary-block"><h4>Отчёт суммаризации <span class="meta">' + escapeHtml(meta || status) + '</span></h4><p class="meta">' + (status === 'PENDING' || status === 'PROCESSING' ? 'В обработке…' : status) + '</p></div>';
+                return '<div class="copy-block summary-block"><h4>Отчёт суммаризации <span class="meta">' + escapeHtml(taskStatusLabel(meta || status)) + '</span></h4><p class="meta">' + (status === 'PENDING' || status === 'PROCESSING' ? 'В обработке…' : escapeHtml(taskStatusLabel(status))) + '</p></div>';
               }).join('');
             }
             if (summarizeBtn && summarizeMsg) {

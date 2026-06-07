@@ -1,4 +1,4 @@
-﻿    async function loadToolsList() {
+    async function loadToolsList() {
       const el = document.getElementById('toolsTable');
       try {
         const r = await fetch(API + '/tools');
@@ -35,7 +35,7 @@
               <td colspan="8"><div class="tools-detail-inner"><pre>${esc(JSON.stringify(t, null, 2))}</pre></div></td>
             </tr>`;
         }).join('');
-        el.innerHTML = `<table><thead><tr><th></th><th>ID</th><th>Имя</th><th>Docker образ</th><th>Расширения</th><th>Включён</th><th>Создан</th><th>Действия</th></tr></thead><tbody>${rows}</tbody></table>`;
+        el.innerHTML = `<table><thead><tr><th></th><th>ID</th><th>Имя</th><th>Образ Docker</th><th>Расширения</th><th>Включён</th><th>Создан</th><th>Действия</th></tr></thead><tbody>${rows}</tbody></table>`;
         el.querySelectorAll('.tools-row').forEach(tr => {
           const toolId = tr.dataset.toolId;
           tr.addEventListener('click', (e) => {
@@ -169,7 +169,7 @@
               <td><span class="expand-icon" data-summarizer-id="${s.id}">▶</span></td>
               <td><code>${esc(s.id)}</code></td>
               <td>${esc(s.name)}</td>
-              <td>${esc(s.provider)}</td>
+              <td>${esc(summarizerProviderLabel(s.provider))}</td>
               <td>${esc(s.baseUrl)}</td>
               <td>${esc(s.modelId)}</td>
               <td>${s.enabled ? 'да' : 'нет'}</td>
@@ -181,7 +181,7 @@
             <tr class="summarizers-detail-row" data-detail-for="${s.id}" style="display:none">
               <td colspan="8"><div class="tools-detail-inner"><pre>${esc(JSON.stringify(s, null, 2))}</pre></div></td>
             </tr>`).join('');
-        el.innerHTML = `<table><thead><tr><th></th><th>ID</th><th>Имя</th><th>Провайдер</th><th>Base URL</th><th>Model ID</th><th>Включён</th><th>Действия</th></tr></thead><tbody>${rows}</tbody></table>`;
+        el.innerHTML = `<table><thead><tr><th></th><th>ID</th><th>Имя</th><th>Провайдер</th><th>Базовый URL</th><th>Модель</th><th>Включён</th><th>Действия</th></tr></thead><tbody>${rows}</tbody></table>`;
         el.querySelectorAll('.summarizers-row').forEach(tr => {
           tr.addEventListener('click', (e) => {
             if (e.target.classList.contains('expand-icon')) return;
@@ -263,7 +263,7 @@
           const r = await fetch(API + '/summarizers/' + editingSummarizerId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
           const j = await r.json();
           if (j.status === 'error' || !r.ok) throw new Error(j.message || r.statusText);
-          msgEl.innerHTML = '<div class="msg ok">Маршрут LLM обновлён</div>';
+          msgEl.innerHTML = '<div class="msg ok">Маршрут отчёта обновлён</div>';
           editingSummarizerId = null;
           form.name.disabled = false;
           document.getElementById('summarizerFormSubmit').textContent = 'Создать';
@@ -274,7 +274,7 @@
           const r = await fetch(API + '/summarizers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
           const j = await r.json();
           if (j.status === 'error' || !r.ok) throw new Error(j.message || r.statusText);
-          msgEl.innerHTML = '<div class="msg ok">Маршрут LLM создан</div>';
+          msgEl.innerHTML = '<div class="msg ok">Маршрут отчёта создан</div>';
         }
         loadSummarizersList();
         loadSummarizers();

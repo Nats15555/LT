@@ -1,4 +1,4 @@
-﻿    async function loadQueuePauseUi() {
+    async function loadQueuePauseUi() {
       const label = document.getElementById('queuePauseLabel');
       const btn = document.getElementById('queuePauseToggle');
       try {
@@ -14,7 +14,7 @@
         const paused = !!j.paused;
         const n = j.pendingKafkaDispatchCount != null ? j.pendingKafkaDispatchCount : 0;
         label.textContent = paused
-          ? 'Пауза очереди включена: задачи сохраняются в БД, в Kafka не уходят. Ожидают отправки после снятия паузы: ' + n + '. В этом режиме можно править конфигурацию Docker при непустой очереди.'
+          ? 'Пауза очереди включена: задачи сохраняются в БД, в Kafka не уходят. Ожидают отправки после снятия паузы: ' + n + '. В этом режиме можно править профили Docker при непустой очереди.'
           : '';
         btn.textContent = paused ? 'Снять паузу очереди' : 'Поставить очередь на паузу';
         btn.dataset.paused = paused ? '1' : '0';
@@ -73,15 +73,15 @@
         }
         el.innerHTML = `
           <table>
-            <thead><tr><th>ID</th><th>Статус</th><th>Инструмент</th><th>Файл</th><th>Docker</th><th>Маршрут LLM</th><th>Создан</th><th></th></tr></thead>
+            <thead><tr><th>ID</th><th>Статус</th><th>Инструмент</th><th>Файл</th><th>Профиль</th><th>Маршрут отчёта</th><th>Создан</th><th></th></tr></thead>
             <tbody>
               ${tasks.map(t => `
                 <tr>
                   <td><code>${t.id}</code></td>
-                  <td>${t.status}</td>
+                  <td>${escapeHtml(taskStatusLabel(t.status))}</td>
                   <td>${t.testTool}</td>
                   <td>${t.testFileName}</td>
-                  <td class="meta">${t.dockerProfileName ? escapeHtml(t.dockerProfileName) : '—'}</td>
+                  <td class="meta">${t.dockerProfileName ? escapeHtml(dockerProfileDisplayName(t.dockerProfileName)) : '—'}</td>
                   <td class="meta">${t.summarizerName ? escapeHtml(t.summarizerName) + summarizerRouteBadgeHtml(t.summarizerName) : '—'}</td>
                   <td class="meta">${formatDate(t.createdAt)}</td>
                   <td class="actions-cell">${t.status === 'PENDING' ? '<button type="button" class="btn btn-small btn-danger btn-delete-queue" data-task-id="' + escapeHtml(t.id) + '">Удалить</button>' : '<span class="meta">—</span>'}</td>

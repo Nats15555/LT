@@ -1,4 +1,4 @@
-﻿    let runFormTools = [];
+    let runFormTools = [];
 
     function formatToolExtensions(exts) {
       if (!Array.isArray(exts) || !exts.length) return '— не заданы —';
@@ -55,5 +55,15 @@
 
     loadTools();
     document.getElementById('toolSelect').addEventListener('change', updateTestFileUiForTool);
+    (function () {
+      const fileInput = document.getElementById('fileInput');
+      const fileLabel = document.getElementById('fileInputLabel');
+      if (!fileInput || !fileLabel) return;
+      fileInput.addEventListener('change', function () {
+        fileLabel.textContent = fileInput.files && fileInput.files.length
+          ? fileInput.files[0].name
+          : 'Файл не выбран';
+      });
+    })();
 
 

@@ -1,6 +1,5 @@
 package com.loadtest.app.service;
 
-import com.loadtest.app.dto.TestTaskEvent;
 import com.loadtest.app.dto.TestTaskMessage;
 import com.loadtest.app.persistence.DockerExecutionProfileEntity;
 import com.loadtest.app.persistence.DockerExecutionProfileRepository;
@@ -16,8 +15,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.Base64;
 import java.util.UUID;
@@ -37,7 +34,6 @@ public class TestQueueService {
     }
 
     private final EntityManager entityManager;
-    private final KafkaOutboxService kafkaOutboxService;
     private final QueuePauseService queuePauseService;
     private final TestTaskHistoryRepository historyRepository;
     private final TestTaskRepository taskRepository;
@@ -84,7 +80,8 @@ public class TestQueueService {
         UUID profileId = resolveDockerExecutionProfileId(dockerExecutionProfileId);
         insertPendingTestTask(taskUuid, testTool, testFileName, testFileContent, command,
                 expectedDurationSeconds, metricsConfigJson, summarizerName, profileId);
-        registerTestTaskKafkaDispatchAfterCommit(taskId, taskUuid);
+        queuePauseService.recordPendingKafkaDispatch(taskUuid);
+        log.info("Task {} registered for slot-based Kafka dispatch (topic '{}')", taskId, testTasksTopic);
         return taskId;
     }
 
@@ -185,30 +182,6 @@ public class TestQueueService {
         return metricsConfigJson;
     }
 
-    private void registerTestTaskKafkaDispatchAfterCommit(String taskId, UUID taskUuid) {
-        TestTaskEvent event = new TestTaskEvent(taskId);
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                dispatchTestTaskEventAfterCommit(taskId, taskUuid, event);
-            }
-        });
-    }
-
-    private void dispatchTestTaskEventAfterCommit(String taskId, UUID taskUuid, TestTaskEvent event) {
-        try {
-            if (queuePauseService.isQueuePaused()) {
-                queuePauseService.recordPendingKafkaDispatch(taskUuid);
-                log.info("Queue paused: task {} saved for Kafka dispatch after unpause", taskId);
-            } else {
-                kafkaOutboxService.sendTestTaskEvent(taskId, event);
-                log.info("✓ Test task event queued for Kafka topic '{}': taskId={}", testTasksTopic, taskId);
-            }
-        } catch (RuntimeException e) {
-            log.error("Failed to queue test task event for Kafka/outbox task {}", taskId, e);
-        }
-    }
-
     private static int resolveExpectedDurationSeconds(Integer expectedDurationSeconds) {
         return expectedDurationSeconds != null ? expectedDurationSeconds : DEFAULT_EXPECTED_DURATION_SECONDS;
     }
@@ -224,6 +197,7 @@ public class TestQueueService {
     public DeletePendingQueueTaskOutcome deletePendingQueueTask(UUID taskId) {
         int removed = taskRepository.deleteByIdIfStatusPending(taskId);
         if (removed > 0) {
+            queuePauseService.cancelPendingKafkaDispatch(taskId);
             log.info("Deleted pending task {} from test_task (Kafka event may still be consumed; execution will no-op).",
                     taskId);
             return DeletePendingQueueTaskOutcome.DELETED;

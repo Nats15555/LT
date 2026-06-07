@@ -1,4 +1,4 @@
-﻿:root,
+:root,
     [data-theme="dark"] {
       color-scheme: dark;
       --accent-bg: #2a3d42;
@@ -235,7 +235,7 @@
     .checkbox-wrap { display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none; }
     .checkbox-wrap input[type="checkbox"] { width: 1.25rem; height: 1.25rem; margin: 0; cursor: pointer; accent-color: var(--accent-edge); }
     .prompt-checkbox-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
-    .form-label-row { margin-bottom: 0.25rem; }
+    .form-label-row { margin-bottom: 0.5rem; }
     .form-label-row .inline-label { display: inline; margin-bottom: 0; color: var(--text-primary); font-weight: 500; cursor: default; }
     .duration-input-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
     .duration-input-row input[type="number"] { max-width: 7rem; }
@@ -454,3 +454,26 @@
     }
     .metrics-req-fields .metrics-field-hint { display: block; margin-top: 0.2rem; font-size: 0.75rem; color: var(--hint); line-height: 1.35; }
     #metricsConfigRaw { width: 100%; max-width: none; }
+    .form-group-file {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .form-group-file .form-label-row {
+      margin-bottom: 0;
+    }
+    .file-input-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.65rem;
+      margin: 0;
+      padding: 0;
+    }
+    .file-input-label { position: relative; display: inline-block; margin: 0; cursor: pointer; }
+    .file-input-native {
+      position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+      opacity: 0; cursor: pointer; z-index: 1;
+    }
+    .file-input-picker { margin: 0; position: relative; z-index: 0; }
+    .file-input-chosen { max-width: 100%; word-break: break-all; }

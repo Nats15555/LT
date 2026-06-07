@@ -1,6 +1,5 @@
 package com.loadtest.app.service;
 
-import com.loadtest.app.dto.TestTaskEvent;
 import com.loadtest.app.persistence.LoadTestSystemSettingsEntity;
 import com.loadtest.app.persistence.LoadTstSystemSettingsRepository;
 import com.loadtest.app.persistence.TestTaskKafkaPendingEntity;
@@ -10,18 +9,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.domain.Pageable;
 
 import java.time.OffsetDateTime;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -34,13 +28,13 @@ class QueuePauseServiceTest {
     @Mock
     private TestTaskKafkaPendingRepository pendingRepository;
     @Mock
-    private KafkaOutboxService kafkaOutboxService;
+    private TestTaskKafkaSlotDispatchService testTaskKafkaSlotDispatchService;
 
     private QueuePauseService service;
 
     @BeforeEach
     void setUp() {
-        service = new QueuePauseService(settingsRepository, pendingRepository, kafkaOutboxService);
+        service = new QueuePauseService(settingsRepository, pendingRepository, testTaskKafkaSlotDispatchService);
     }
 
     @Test
@@ -86,46 +80,30 @@ class QueuePauseServiceTest {
     }
 
     @Test
-    void setPaused_whenResuming_drainsPending() {
-        UUID taskId = UUID.randomUUID();
+    void setPaused_whenResuming_triggersSlotDispatch() {
         when(settingsRepository.findById(1)).thenReturn(Optional.of(
                 LoadTestSystemSettingsEntity.builder().id(1).queuePaused(true).updatedAt(OffsetDateTime.now()).build()));
-        when(pendingRepository.findByOrderByCreatedAtAsc(any(Pageable.class)))
-                .thenReturn(List.of(TestTaskKafkaPendingEntity.builder()
-                        .taskId(taskId)
-                        .createdAt(OffsetDateTime.now())
-                        .build()))
-                .thenReturn(List.of());
+        when(pendingRepository.count()).thenReturn(2L);
         QueuePauseService.QueuePauseState st = service.setPaused(false);
-        verify(kafkaOutboxService).sendTestTaskEvent(eq(taskId.toString()), any(TestTaskEvent.class));
-        verify(pendingRepository).deleteById(taskId);
-        assertThat(st).isNotNull();
+        verify(testTaskKafkaSlotDispatchService).dispatchAvailableSlots();
+        assertThat(st.paused()).isFalse();
     }
 
     @Test
-    void setPaused_trueDoesNotDrain() {
+    void setPaused_trueDoesNotDispatch() {
         when(settingsRepository.findById(1)).thenReturn(Optional.of(
                 LoadTestSystemSettingsEntity.builder().id(1).queuePaused(false).updatedAt(OffsetDateTime.now()).build()));
         when(pendingRepository.count()).thenReturn(0L);
         QueuePauseService.QueuePauseState st = service.setPaused(true);
         assertThat(st.paused()).isTrue();
-        verify(pendingRepository, never()).findByOrderByCreatedAtAsc(any(Pageable.class));
+        verify(testTaskKafkaSlotDispatchService, never()).dispatchAvailableSlots();
     }
 
     @Test
-    void setPaused_drainStopsWhenKafkaFails() {
+    void cancelPendingKafkaDispatch_deletesRow() {
         UUID taskId = UUID.randomUUID();
-        when(settingsRepository.findById(1)).thenReturn(Optional.of(
-                LoadTestSystemSettingsEntity.builder().id(1).queuePaused(true).updatedAt(OffsetDateTime.now()).build()));
-        when(pendingRepository.findByOrderByCreatedAtAsc(any(Pageable.class)))
-                .thenReturn(List.of(TestTaskKafkaPendingEntity.builder()
-                        .taskId(taskId)
-                        .createdAt(OffsetDateTime.now())
-                        .build()));
-        doThrow(new RuntimeException("send failed")).when(kafkaOutboxService)
-                .sendTestTaskEvent(anyString(), any(TestTaskEvent.class));
-        service.setPaused(false);
-        verify(pendingRepository, never()).deleteById(taskId);
+        service.cancelPendingKafkaDispatch(taskId);
+        verify(pendingRepository).deleteById(taskId);
     }
 
     @Test

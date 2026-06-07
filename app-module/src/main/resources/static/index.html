@@ -10,7 +10,7 @@
       if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
     })();
   </script>
-  <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/app.css?v=20260531">
 </head><body>
   <h1>LoadTest</h1>
   <nav class="app-nav">
@@ -66,10 +66,10 @@
         <select name="tool" id="toolSelect" required></select>
       </div>
       <div class="form-group">
-        <label>Профиль Docker</label>
+        <label>Профиль Docker-выполнения</label>
         <select name="dockerExecutionProfileId" id="dockerProfileSelect" required></select>
       </div>
-      <div class="form-group">
+      <div class="form-group form-group-file">
         <div class="prompt-checkbox-row form-label-row">
           <label for="fileInput" class="inline-label">Файл теста</label>
           <span class="help-wrap" id="testFileHelpWrap">
@@ -79,15 +79,21 @@
               <p class="meta" style="margin-top:0.5rem"><strong>Расширение файла должно соответствовать выбранному инструменту.</strong> При загрузке выполняется проверка по списку допустимых расширений из конфигурации инструмента (вкладка «Конфигурация» → «Инструменты»).</p>
               <p class="meta" style="margin-top:0.5rem">Типовые соответствия:</p>
               <ul class="help-list">
-                <li><strong>LOCUST</strong> — <code>.py</code></li>
+                <li><strong>Locust</strong> — <code>.py</code></li>
                 <li><strong>K6</strong> — <code>.js</code></li>
-                <li><strong>JMETER</strong> — <code>.jmx</code></li>
+                <li><strong>JMeter</strong> — <code>.jmx</code></li>
               </ul>
               <p class="meta" style="margin-top:0.5rem">Для выбранного инструмента: <span id="testFileAllowedExts">— выберите инструмент —</span></p>
             </div>
           </span>
         </div>
-        <input type="file" name="file" id="fileInput" required accept=".py,.js,.jmx">
+        <div class="file-input-row">
+          <label class="file-input-label">
+            <span class="btn btn-secondary file-input-picker">Выбрать файл</span>
+            <input type="file" name="file" id="fileInput" required accept=".py,.js,.jmx" class="file-input-native">
+          </label>
+          <span class="meta file-input-chosen" id="fileInputLabel">Файл не выбран</span>
+        </div>
       </div>
       <div class="form-group">
         <div class="prompt-checkbox-row form-label-row">
@@ -135,7 +141,7 @@ locust -f /mnt/test/{fileName} --headless -H http://test-app-1:8080 -u 10 -r 2 -
           <span class="help-wrap" id="metricsConfigHelpWrap">
             <button type="button" class="help-btn" aria-describedby="metricsConfigHelp">?</button>
             <div id="metricsConfigHelp" class="help-tooltip" role="tooltip">
-              <p class="meta">Если галочка включена, после прогона <strong>metrics-collector</strong> выполнит HTTP-запросы к Prometheus, Elasticsearch и другим API. Ответы сохраняются в истории прогона и используются при суммаризации.</p>
+              <p class="meta">Если галочка включена, после прогона <strong>модуль сбора метрик</strong> выполнит HTTP-запросы к Prometheus, Elasticsearch и другим API. Ответы сохраняются в истории прогона и используются при суммаризации.</p>
               <p class="meta" style="margin-top:0.5rem">В URL и query допускаются плейсхолдеры <code>{testStartTimeMs}</code> и <code>{testEndTimeMs}</code> — подставляются по времени начала и окончания теста.</p>
               <pre>Пример metricsConfig:
 
@@ -167,7 +173,7 @@ locust -f /mnt/test/{fileName} --headless -H http://test-app-1:8080 -u 10 -r 2 -
         </div>
       </div>
       <div class="form-group">
-        <label>Маршрут отчёта (опционально): LiteLLM или внешний</label>
+        <label>Маршрут отчёта (необязательно)</label>
         <select name="summarizer" id="summarizerSelect">
           <option value="">— без суммаризации —</option>
         </select>
@@ -198,7 +204,7 @@ locust -f /mnt/test/{fileName} --headless -H http://test-app-1:8080 -u 10 -r 2 -
     <nav class="subnav">
       <button type="button" data-subtab="tools">Инструменты</button>
       <button type="button" data-subtab="summarizers">Суммаризаторы</button>
-      <button type="button" data-subtab="docker">Docker</button>
+      <button type="button" data-subtab="docker">Докер</button>
     </nav>
 
     <div id="config-tools" class="config-panel visible">
@@ -207,11 +213,11 @@ locust -f /mnt/test/{fileName} --headless -H http://test-app-1:8080 -u 10 -r 2 -
         <h3>Добавить инструмент</h3>
         <form id="toolForm">
           <div class="form-group">
-            <label>Имя (например LOCUST, K6, JMETER)</label>
+            <label>Имя (например LOCUST, K6, JMETER — латиницей)</label>
             <input type="text" name="name" required placeholder="K6">
           </div>
           <div class="form-group">
-            <label>Docker образ</label>
+            <label>Образ Docker</label>
             <input type="text" name="dockerImage" required placeholder="grafana/k6:latest">
           </div>
           <div class="form-group">
@@ -236,29 +242,29 @@ locust -f /mnt/test/{fileName} --headless -H http://test-app-1:8080 -u 10 -r 2 -
         <h3>Добавить маршрут</h3>
         <form id="summarizerForm">
           <div class="form-group">
-            <label>Имя (уникальное, например MY_LITELLM, OPENAI_DIRECT)</label>
-            <input type="text" name="name" required placeholder="MY_LITELLM_ROUTE">
+            <label>Имя (уникальное, латиницей, например MY_LLM, EXTERNAL_GW)</label>
+            <input type="text" name="name" required placeholder="MY_LLM_ROUTE">
           </div>
           <div class="form-group">
             <label>Провайдер</label>
             <select name="provider" id="summarizerProviderSelect">
               <option value="">— выберите провайдер —</option>
-              <option value="OPENAI">OPENAI — вызов через summarization-service (LiteLLM и др.)</option>
-              <option value="EXTERNAL">EXTERNAL — callback в вашем контуре (package + summary)</option>
+              <option value="OPENAI">Встроенный — через сервис суммаризации (совместимый с OpenAI API)</option>
+              <option value="EXTERNAL">Внешний — callback в вашем контуре (пакет + отчёт)</option>
             </select>
           </div>
           <div id="summarizerProviderSpecificFields" style="display:none">
             <div class="form-group">
-              <label id="summarizerBaseUrlLabel">Base URL (LiteLLM / OpenAI — без суффикса /v1/...)</label>
+              <label id="summarizerBaseUrlLabel">Базовый URL (без суффикса /v1/...)</label>
               <input type="text" name="baseUrl" id="summarizerBaseUrlInput" placeholder="http://localhost:4000">
             </div>
             <div class="form-group" id="summarizerModelIdRow">
-              <label id="summarizerModelIdLabel">Model ID (имя модели)</label>
+              <label id="summarizerModelIdLabel">Идентификатор модели</label>
               <input type="text" name="modelId" placeholder="loadtest-summary">
             </div>
             <div class="form-group" id="summarizerApiKeyRow">
               <label>Имя переменной окружения для Bearer-токена (опционально)</label>
-              <input type="text" name="apiKeyEnvVar" placeholder="LITELLM_MASTER_KEY" title="Переменная в окружении summarization-service, например LITELLM_MASTER_KEY для LiteLLM">
+              <input type="text" name="apiKeyEnvVar" placeholder="LITELLM_MASTER_KEY" title="Имя переменной окружения сервиса суммаризации с Bearer-токеном">
             </div>
             <div class="form-group">
               <label class="checkbox-wrap"><input type="checkbox" name="enabled" checked> Включён</label>
@@ -282,14 +288,14 @@ locust -f /mnt/test/{fileName} --headless -H http://test-app-1:8080 -u 10 -r 2 -
           <input type="hidden" id="dockerEditingProfileId" value="">
           <div class="form-group">
             <label>Имя профиля</label>
-            <input type="text" name="profileName" id="dockerProfileName" required placeholder="Default">
+            <input type="text" name="profileName" id="dockerProfileName" required placeholder="По умолчанию">
           </div>
           <div class="form-group">
             <label>Docker Engine URI (необязательно)</label>
             <input type="text" name="dockerHostUri" id="dockerHostUri" autocomplete="off" placeholder="Пусто = DOCKER_HOST / сокет процесса execution">
           </div>
           <div class="form-group">
-            <label>Named volume для bindов (необязательно)</label>
+            <label>Именованный том для bind-монтирования (необязательно)</label>
             <input type="text" name="namedVolumeForChildBinds" id="namedVolumeForChildBinds" autocomplete="off" placeholder="loadtest_execution-data">
           </div>
           <div class="form-group">
@@ -299,55 +305,55 @@ locust -f /mnt/test/{fileName} --headless -H http://test-app-1:8080 -u 10 -r 2 -
             </label>
           </div>
           <div class="form-group">
-            <label>Memory limit (MB)</label>
+            <label>Лимит памяти (МБ)</label>
             <input type="number" name="memoryLimitMb" min="1" placeholder="512">
           </div>
           <div class="form-group">
-            <label>Memory reservation (MB)</label>
+            <label>Резерв памяти (МБ)</label>
             <input type="number" name="memoryReservationMb" min="1" placeholder="256">
           </div>
           <div class="form-group">
-            <label>CPU limit</label>
+            <label>Лимит CPU</label>
             <input type="number" name="cpuLimit" min="0" step="0.01" placeholder="1.0">
           </div>
           <div class="form-group">
-            <label>CPU shares</label>
+            <label>Доля CPU (shares)</label>
             <input type="number" name="cpuShares" min="0" placeholder="0">
           </div>
           <div class="form-group">
-            <label>Max concurrent containers</label>
+            <label>Макс. параллельных контейнеров</label>
             <input type="number" name="maxConcurrentContainers" min="1" required placeholder="1">
           </div>
           <div class="form-group">
-            <label>Network mode</label>
+            <label>Режим сети</label>
             <input type="text" name="networkMode" placeholder="bridge">
           </div>
           <div class="form-group">
-            <label>Restart policy</label>
+            <label>Политика перезапуска</label>
             <input type="text" name="restartPolicy" placeholder="no">
           </div>
           <div class="form-group">
-            <label>Restart max retries</label>
+            <label>Макс. попыток перезапуска</label>
             <input type="number" name="restartMaxRetries" min="0" placeholder="0">
           </div>
           <div class="form-group">
-            <label>Log driver</label>
+            <label>Драйвер логов</label>
             <input type="text" name="logDriver" placeholder="json-file">
           </div>
           <div class="form-group">
-            <label>Log max size</label>
+            <label>Макс. размер лога</label>
             <input type="text" name="logMaxSize" placeholder="10m">
           </div>
           <div class="form-group">
-            <label>Log max files</label>
+            <label>Макс. файлов лога</label>
             <input type="number" name="logMaxFiles" min="1" placeholder="3">
           </div>
           <div class="form-group">
-            <label>Environment variables (JSON)</label>
+            <label>Переменные окружения (JSON)</label>
             <textarea name="environmentVariables" rows="2" placeholder="{}"></textarea>
           </div>
           <div class="form-group">
-            <label>Labels (JSON)</label>
+            <label>Метки (JSON)</label>
             <textarea name="labels" rows="2" placeholder="{}"></textarea>
           </div>
           <button type="submit" class="btn" id="dockerFormSubmit">Создать</button>

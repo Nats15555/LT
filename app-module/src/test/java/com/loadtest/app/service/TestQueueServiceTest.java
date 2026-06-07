@@ -13,19 +13,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
-import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.test.util.ReflectionTestUtils;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -34,7 +30,6 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -45,8 +40,6 @@ class TestQueueServiceTest {
 
     @Mock
     private EntityManager entityManager;
-    @Mock
-    private KafkaOutboxService kafkaOutboxService;
     @Mock
     private QueuePauseService queuePauseService;
     @Mock
@@ -62,7 +55,6 @@ class TestQueueServiceTest {
     void setUp() {
         service = new TestQueueService(
                 entityManager,
-                kafkaOutboxService,
                 queuePauseService,
                 historyRepository,
                 taskRepository,
@@ -75,6 +67,7 @@ class TestQueueServiceTest {
         UUID id = UUID.randomUUID();
         when(taskRepository.deleteByIdIfStatusPending(id)).thenReturn(1);
         assertThat(service.deletePendingQueueTask(id)).isEqualTo(TestQueueService.DeletePendingQueueTaskOutcome.DELETED);
+        verify(queuePauseService).cancelPendingKafkaDispatch(id);
 
         when(taskRepository.deleteByIdIfStatusPending(id)).thenReturn(0);
         when(taskRepository.existsById(id)).thenReturn(false);
@@ -102,16 +95,14 @@ class TestQueueServiceTest {
         TestTaskHistoryEntity hist = historyEntity(hid, t, 120, "route", pid, null);
         when(historyRepository.findById(hid)).thenReturn(Optional.of(hist));
         Query q = stubInsertQuery();
+        stubDefaultProfile();
 
-        try (var tsm = Mockito.mockStatic(TransactionSynchronizationManager.class)) {
-            tsm.when(TransactionSynchronizationManager::isSynchronizationActive).thenReturn(true);
-            tsm.when(() -> TransactionSynchronizationManager.registerSynchronization(any())).thenAnswer(inv -> null);
-            assertThat(service.rerunFromHistory(hid, null)).isNotBlank();
-            verify(q).setParameter(eq(NativeQueryParams.TEST_TOOL), eq("K6"));
-            verify(q).setParameter(eq(NativeQueryParams.EXPECTED_DURATION_SECONDS), eq(120));
-            verify(q).setParameter(eq(NativeQueryParams.SUMMARIZER_NAME), eq("route"));
-            verify(q).setParameter(eq(NativeQueryParams.DOCKER_PROFILE_ID), eq(pid));
-        }
+        assertThat(service.rerunFromHistory(hid, null)).isNotBlank();
+        verify(q).setParameter(eq(NativeQueryParams.TEST_TOOL), eq("K6"));
+        verify(q).setParameter(eq(NativeQueryParams.EXPECTED_DURATION_SECONDS), eq(120));
+        verify(q).setParameter(eq(NativeQueryParams.SUMMARIZER_NAME), eq("route"));
+        verify(q).setParameter(eq(NativeQueryParams.DOCKER_PROFILE_ID), eq(pid));
+        verify(queuePauseService).recordPendingKafkaDispatch(any(UUID.class));
     }
 
     @Test
@@ -122,14 +113,11 @@ class TestQueueServiceTest {
         TestTaskHistoryEntity hist = historyEntity(hid, t, null, "route", pid, null);
         when(historyRepository.findById(hid)).thenReturn(Optional.of(hist));
         Query q = stubInsertQuery();
+        stubDefaultProfile();
 
-        try (var tsm = Mockito.mockStatic(TransactionSynchronizationManager.class)) {
-            tsm.when(TransactionSynchronizationManager::isSynchronizationActive).thenReturn(true);
-            tsm.when(() -> TransactionSynchronizationManager.registerSynchronization(any())).thenAnswer(inv -> null);
-            assertThat(service.rerunFromHistory(hid, "override")).isNotBlank();
-            verify(q).setParameter(eq(NativeQueryParams.EXPECTED_DURATION_SECONDS), eq(60));
-            verify(q).setParameter(eq(NativeQueryParams.SUMMARIZER_NAME), eq("override"));
-        }
+        assertThat(service.rerunFromHistory(hid, "override")).isNotBlank();
+        verify(q).setParameter(eq(NativeQueryParams.EXPECTED_DURATION_SECONDS), eq(60));
+        verify(q).setParameter(eq(NativeQueryParams.SUMMARIZER_NAME), eq("override"));
     }
 
     @Test
@@ -140,14 +128,14 @@ class TestQueueServiceTest {
     }
 
     @Test
-    void enqueueTest_afterCommit_sendsKafkaWhenUnpaused() {
-        runEnqueueAfterCommit(false);
-        verify(kafkaOutboxService).sendTestTaskEvent(anyString(), any());
+    void enqueueTest_registersPendingForScheduler() {
+        runEnqueue(false);
+        verify(queuePauseService).recordPendingKafkaDispatch(any(UUID.class));
     }
 
     @Test
-    void enqueueTest_afterCommit_recordsPendingWhenPaused() {
-        runEnqueueAfterCommit(true);
+    void enqueueTest_registersPendingWhenQueuePaused() {
+        runEnqueue(true);
         verify(queuePauseService).recordPendingKafkaDispatch(any(UUID.class));
     }
 
@@ -164,12 +152,8 @@ class TestQueueServiceTest {
                         .id(fallbackId).name("f").enabled(true).maxConcurrentContainers(1)
                         .createdAt(OffsetDateTime.MIN).updatedAt(OffsetDateTime.MIN).build()));
 
-        try (var tsm = Mockito.mockStatic(TransactionSynchronizationManager.class)) {
-            tsm.when(TransactionSynchronizationManager::isSynchronizationActive).thenReturn(true);
-            tsm.when(() -> TransactionSynchronizationManager.registerSynchronization(any())).thenAnswer(inv -> null);
-            service.enqueueTest("K6", "f.js", "QQ==", "run", 10, null, null, null, null);
-            verify(q).setParameter(eq(NativeQueryParams.DOCKER_PROFILE_ID), eq(fallbackId));
-        }
+        service.enqueueTest("K6", "f.js", "QQ==", "run", 10, null, null, null, null);
+        verify(q).setParameter(eq(NativeQueryParams.DOCKER_PROFILE_ID), eq(fallbackId));
     }
 
     @Test
@@ -188,46 +172,30 @@ class TestQueueServiceTest {
         TestTaskHistoryEntity hist = historyEntity(hid, t, 60, "history-route", pid, "{}");
         when(historyRepository.findById(hid)).thenReturn(Optional.of(hist));
         Query q = stubInsertQuery();
+        stubDefaultProfile();
 
-        try (var tsm = Mockito.mockStatic(TransactionSynchronizationManager.class)) {
-            tsm.when(TransactionSynchronizationManager::isSynchronizationActive).thenReturn(true);
-            tsm.when(() -> TransactionSynchronizationManager.registerSynchronization(any())).thenAnswer(inv -> null);
-            assertThat(service.rerunFromHistory(hid, "   ")).isNotBlank();
-            verify(q).setParameter(eq(NativeQueryParams.METRICS_CONFIG), eq("{}"));
-            verify(q).setParameter(eq(NativeQueryParams.SUMMARIZER_NAME), eq("history-route"));
-        }
+        assertThat(service.rerunFromHistory(hid, "   ")).isNotBlank();
+        verify(q).setParameter(eq(NativeQueryParams.METRICS_CONFIG), eq("{}"));
+        verify(q).setParameter(eq(NativeQueryParams.SUMMARIZER_NAME), eq("history-route"));
     }
 
     @Test
-    void enqueueTest_withMetricsAndNullCommand_andAfterCommitError() {
+    void enqueueTest_withMetricsAndNullCommand_registersPending() {
         Query q = mock(Query.class);
         when(entityManager.createNativeQuery(contains("INSERT INTO test_task"))).thenReturn(q);
         when(q.setParameter(anyString(), any())).thenReturn(q);
         when(q.executeUpdate()).thenReturn(1);
-        doThrow(new RuntimeException("kafka down")).when(kafkaOutboxService).sendTestTaskEvent(anyString(), any());
         UUID providedProfile = UUID.randomUUID();
 
         TestTaskMessage.MetricsConfig.MetricsRequest req = new TestTaskMessage.MetricsConfig.MetricsRequest(
                 "r1", "GET", "http://m", null, null, null);
         TestTaskMessage.MetricsConfig cfg = new TestTaskMessage.MetricsConfig(1, List.of(req));
 
-        try (var tsm = Mockito.mockStatic(TransactionSynchronizationManager.class)) {
-            AtomicReference<TransactionSynchronization> sync = new AtomicReference<>();
-            tsm.when(TransactionSynchronizationManager::isSynchronizationActive).thenReturn(true);
-            tsm.when(() -> TransactionSynchronizationManager.registerSynchronization(any()))
-                    .thenAnswer(inv -> {
-                        sync.set(inv.getArgument(0));
-                        return null;
-                    });
-            when(queuePauseService.isQueuePaused()).thenReturn(false);
-
-            service.enqueueTest("K6", "m.js", null, null, 30, cfg, "{\"a\":1}", "sum", providedProfile);
-            verify(q).setParameter(eq(NativeQueryParams.DOCKER_PROFILE_ID), eq(providedProfile));
-            verify(q).setParameter(eq(NativeQueryParams.COMMAND), eq(""));
-            verify(q).setParameter(eq(NativeQueryParams.METRICS_CONFIG), eq("{\"a\":1}"));
-            assertThat(sync.get()).isNotNull();
-            sync.get().afterCommit();
-        }
+        service.enqueueTest("K6", "m.js", null, null, 30, cfg, "{\"a\":1}", "sum", providedProfile);
+        verify(q).setParameter(eq(NativeQueryParams.DOCKER_PROFILE_ID), eq(providedProfile));
+        verify(q).setParameter(eq(NativeQueryParams.COMMAND), eq(""));
+        verify(q).setParameter(eq(NativeQueryParams.METRICS_CONFIG), eq("{\"a\":1}"));
+        verify(queuePauseService).recordPendingKafkaDispatch(any(UUID.class));
     }
 
     @Test
@@ -240,21 +208,8 @@ class TestQueueServiceTest {
 
         TestTaskMessage.MetricsConfig cfg = new TestTaskMessage.MetricsConfig(2, null);
 
-        try (var tsm = Mockito.mockStatic(TransactionSynchronizationManager.class)) {
-            AtomicReference<TransactionSynchronization> sync = new AtomicReference<>();
-            tsm.when(TransactionSynchronizationManager::isSynchronizationActive).thenReturn(true);
-            tsm.when(() -> TransactionSynchronizationManager.registerSynchronization(any()))
-                    .thenAnswer(inv -> {
-                        sync.set(inv.getArgument(0));
-                        return null;
-                    });
-            when(queuePauseService.isQueuePaused()).thenReturn(false);
-
-            service.enqueueTest("K6", "n.js", "QQ==", "run", 30, cfg, null, null, providedProfile);
-            verify(q).setParameter(eq(NativeQueryParams.METRICS_CONFIG), isNull());
-            assertThat(sync.get()).isNotNull();
-            sync.get().afterCommit();
-        }
+        service.enqueueTest("K6", "n.js", "QQ==", "run", 30, cfg, null, null, providedProfile);
+        verify(q).setParameter(eq(NativeQueryParams.METRICS_CONFIG), isNull());
     }
 
     private Query stubInsertQuery() {
@@ -283,8 +238,7 @@ class TestQueueServiceTest {
                 .build();
     }
 
-    private void runEnqueueAfterCommit(boolean paused) {
-        stubInsertQuery();
+    private void stubDefaultProfile() {
         UUID profileId = UUID.randomUUID();
         when(dockerExecutionProfileRepository.findFirstByNameAndEnabledTrue(anyString()))
                 .thenReturn(Optional.of(DockerExecutionProfileEntity.builder()
@@ -295,19 +249,12 @@ class TestQueueServiceTest {
                         .createdAt(OffsetDateTime.MIN)
                         .updatedAt(OffsetDateTime.MIN)
                         .build()));
+    }
 
-        try (var tsm = Mockito.mockStatic(TransactionSynchronizationManager.class)) {
-            AtomicReference<TransactionSynchronization> sync = new AtomicReference<>();
-            tsm.when(TransactionSynchronizationManager::isSynchronizationActive).thenReturn(true);
-            tsm.when(() -> TransactionSynchronizationManager.registerSynchronization(any()))
-                    .thenAnswer(inv -> {
-                        sync.set(inv.getArgument(0));
-                        return null;
-                    });
-            when(queuePauseService.isQueuePaused()).thenReturn(paused);
-            service.enqueueTest("K6", "f.js", "QQ==", "run", 10, null, null, null, null);
-            assertThat(sync.get()).isNotNull();
-            sync.get().afterCommit();
-        }
+    private void runEnqueue(boolean paused) {
+        stubInsertQuery();
+        stubDefaultProfile();
+        when(queuePauseService.isQueuePaused()).thenReturn(paused);
+        service.enqueueTest("K6", "f.js", "QQ==", "run", 10, null, null, null, null);
     }
 }

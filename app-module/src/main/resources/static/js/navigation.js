@@ -1,4 +1,4 @@
-﻿    async function loadDockerProfilesForRun() {
+    async function loadDockerProfilesForRun() {
       const sel = document.getElementById('dockerProfileSelect');
       if (!sel) return;
       try {
@@ -10,7 +10,7 @@
         list.forEach(function (p) {
           const o = document.createElement('option');
           o.value = p.id;
-          o.textContent = p.name + ' (до ' + p.maxConcurrentContainers + ' параллельно)';
+          o.textContent = dockerProfileDisplayName(p.name) + ' (до ' + p.maxConcurrentContainers + ' параллельно)';
           sel.appendChild(o);
         });
         if (!sel.options.length) {
@@ -26,13 +26,13 @@
       const { llm, ext } = partitionSummarizersByProvider(list);
       if (llm.length) {
         const og = document.createElement('optgroup');
-        og.label = 'Через summarization-service (LiteLLM и др.)';
+        og.label = 'Встроенный сервис суммаризации';
         llm.forEach(s => og.appendChild(new Option(summarizerSelectLabel(s), s.name)));
         selectEl.appendChild(og);
       }
       if (ext.length) {
         const og = document.createElement('optgroup');
-        og.label = 'Внешний контур (без LiteLLM)';
+        og.label = 'Внешний контур (callback)';
         ext.forEach(s => og.appendChild(new Option(summarizerSelectLabel(s), s.name)));
         selectEl.appendChild(og);
       }

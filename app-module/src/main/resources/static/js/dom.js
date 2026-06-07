@@ -1,3 +1,33 @@
+/** Отображаемое имя профиля Docker (в БД могут остаться английские имена из seed). */
+function dockerProfileDisplayName(name) {
+  const n = String(name || '').trim();
+  if (n === 'Default') return 'По умолчанию';
+  if (n === 'Alternate (1 slot)') return 'Альтернативный (1 слот)';
+  return n;
+}
+
+/** Статус задачи в очереди/истории для пользователя. */
+function taskStatusLabel(status) {
+  const s = String(status || '').trim().toUpperCase();
+  const map = {
+    PENDING: 'Ожидает',
+    PROCESSING: 'Выполняется',
+    METRICS_COLLECTING: 'Сбор метрик',
+    ANALYZING: 'Суммаризация',
+    COMPLETED: 'Завершён',
+    FAILED: 'Ошибка',
+    AWAITING_EXTERNAL_CALLBACK: 'Ожидает внешний отчёт'
+  };
+  return map[s] || (status || '—');
+}
+
+function summarizerProviderLabel(provider) {
+  const p = String(provider || '').trim().toUpperCase();
+  if (p === 'EXTERNAL') return 'внешний';
+  if (p === 'OPENAI') return 'встроенный';
+  return provider || '—';
+}
+
 function escapeHtml(s) {
   const div = document.createElement('div');
   div.textContent = s;

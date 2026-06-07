@@ -1,4 +1,4 @@
-﻿    async function refreshSummarizerProviderMap() {
+    async function refreshSummarizerProviderMap() {
       summarizerProviderByName = new Map();
       try {
         const r = await fetch(API + '/summarizers');
@@ -13,18 +13,19 @@
 
     function summarizerSelectLabel(s) {
       const p = String(s.provider || 'OPENAI').toUpperCase();
-      const hint = p === 'EXTERNAL' ? 'внешний контур (без LiteLLM)' : 'через summarization-service (часто LiteLLM)';
-      return s.name + ' — ' + p + ' · ' + hint;
+      const hint = p === 'EXTERNAL' ? 'внешний контур' : 'встроенный сервис суммаризации';
+      const prov = p === 'EXTERNAL' ? 'внешний' : 'встроенный';
+      return s.name + ' — ' + prov + ' · ' + hint;
     }
 
     function summarizerRouteBadgeHtml(summarizerName) {
       if (!summarizerName) return '';
       const p = summarizerProviderByName.get(summarizerName);
       if (p === 'EXTERNAL') {
-        return ' <span class="meta" title="Не идёт в LiteLLM: пакет наружу и callback summary">[EXTERNAL]</span>';
+        return ' <span class="meta" title="Пакет наружу и callback с отчётом">[внешний]</span>';
       }
       if (p) {
-        return ' <span class="meta" title="Идёт в summarization-service → POST …/v1/chat/completions (у вас обычно LiteLLM)">[LiteLLM]</span>';
+        return ' <span class="meta" title="Вызов сервиса суммаризации (OpenAI-совместимый API)">[встроенный]</span>';
       }
       return '';
     }
@@ -50,13 +51,13 @@
       if (baseLbl) {
         baseLbl.textContent = ext
           ? 'Полный URL приёма пакета (ingest), POST JSON — куда app-module отправит метрики и артефакты'
-          : 'Base URL (LiteLLM / OpenAI — без суффикса /v1/...)';
+          : 'Базовый URL (без суффикса /v1/...)';
       }
       if (baseInp) {
         baseInp.placeholder = ext ? 'https://your-gw.example.com/loadtest/ingest' : 'http://localhost:4000';
       }
       if (modelLbl) {
-        modelLbl.textContent = ext ? 'Метка модели (опционально, по умолчанию external)' : 'Model ID (имя модели)';
+        modelLbl.textContent = ext ? 'Метка модели (необязательно)' : 'Идентификатор модели';
       }
       if (modelRow) modelRow.style.display = '';
       if (apiKeyRow) apiKeyRow.style.display = ext ? 'none' : '';
@@ -80,12 +81,12 @@
       const { llm, ext } = partitionSummarizersByProvider(list);
       let h = '';
       if (llm.length) {
-        h += '<optgroup label="Через summarization-service (LiteLLM и др.)">';
+        h += '<optgroup label="Встроенный сервис суммаризации">';
         h += llm.map(s => `<option value="${escapeAttr(s.name)}">${escapeHtml(summarizerSelectLabel(s))}</option>`).join('');
         h += '</optgroup>';
       }
       if (ext.length) {
-        h += '<optgroup label="Внешний контур (без LiteLLM)">';
+        h += '<optgroup label="Внешний контур (callback)">';
         h += ext.map(s => `<option value="${escapeAttr(s.name)}">${escapeHtml(summarizerSelectLabel(s))}</option>`).join('');
         h += '</optgroup>';
       }

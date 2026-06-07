@@ -1,31 +1,35 @@
 package com.loadtest.app.service;
 
-import com.loadtest.app.dto.TestTaskEvent;
 import com.loadtest.app.persistence.LoadTestSystemSettingsEntity;
 import com.loadtest.app.persistence.LoadTstSystemSettingsRepository;
 import com.loadtest.app.persistence.TestTaskKafkaPendingEntity;
 import com.loadtest.app.persistence.TestTaskKafkaPendingRepository;
 import jakarta.annotation.PostConstruct;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.domain.PageRequest;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
-import java.util.List;
 import java.util.UUID;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class QueuePauseService {
 
     private static final int SETTINGS_ID = 1;
 
     private final LoadTstSystemSettingsRepository settingsRepository;
     private final TestTaskKafkaPendingRepository pendingRepository;
-    private final KafkaOutboxService kafkaOutboxService;
+    private final TestTaskKafkaSlotDispatchService testTaskKafkaSlotDispatchService;
+
+    public QueuePauseService(LoadTstSystemSettingsRepository settingsRepository,
+                             TestTaskKafkaPendingRepository pendingRepository,
+                             @Lazy TestTaskKafkaSlotDispatchService testTaskKafkaSlotDispatchService) {
+        this.settingsRepository = settingsRepository;
+        this.pendingRepository = pendingRepository;
+        this.testTaskKafkaSlotDispatchService = testTaskKafkaSlotDispatchService;
+    }
 
     @PostConstruct
     public void ensureSchema() {
@@ -54,6 +58,7 @@ public class QueuePauseService {
         }
     }
 
+    @Transactional
     public void recordPendingKafkaDispatch(UUID taskId) {
         if (!pendingRepository.existsById(taskId)) {
             pendingRepository.save(TestTaskKafkaPendingEntity.builder()
@@ -61,7 +66,11 @@ public class QueuePauseService {
                     .createdAt(OffsetDateTime.now())
                     .build());
         }
-        log.info("Task {} held for Kafka until queue pause is released (test_task_kafka_pending)", taskId);
+        log.info("Task {} queued for slot-based Kafka dispatch (test_task_kafka_pending)", taskId);
+    }
+
+    public void cancelPendingKafkaDispatch(UUID taskId) {
+        pendingRepository.deleteById(taskId);
     }
 
     @Transactional
@@ -73,7 +82,7 @@ public class QueuePauseService {
         settingsRepository.save(settings);
         log.info("Queue pause set to {}", paused);
         if (!paused) {
-            drainPendingTestTaskKafkaEvents();
+            testTaskKafkaSlotDispatchService.dispatchAvailableSlots();
         }
         return getState();
     }
@@ -89,27 +98,6 @@ public class QueuePauseService {
                 .queuePaused(false)
                 .updatedAt(now)
                 .build();
-    }
-
-    private void drainPendingTestTaskKafkaEvents() {
-        while (true) {
-            List<TestTaskKafkaPendingEntity> batch =
-                    pendingRepository.findByOrderByCreatedAtAsc(PageRequest.of(0, 100));
-            if (batch.isEmpty()) {
-                break;
-            }
-            for (TestTaskKafkaPendingEntity row : batch) {
-                String taskId = row.getTaskId().toString();
-                try {
-                    kafkaOutboxService.sendTestTaskEvent(taskId, new TestTaskEvent(taskId));
-                    pendingRepository.deleteById(row.getTaskId());
-                    log.info("Released held Kafka event for task {} after queue unpause", taskId);
-                } catch (RuntimeException e) {
-                    log.error("Failed to dispatch held Kafka event for task {}, will retry on next unpause", taskId, e);
-                    return;
-                }
-            }
-        }
     }
 
     public record QueuePauseState(boolean paused, long pendingKafkaDispatchCount) {}

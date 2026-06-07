@@ -1,4 +1,4 @@
-﻿    async function fetchMetricsConfigSchema() {
+    async function fetchMetricsConfigSchema() {
       if (metricsConfigSchema) return metricsConfigSchema;
       const r = await fetch(API + '/metrics-config-schema');
       if (!r.ok) throw new Error('Не удалось загрузить JSON Schema метрик (HTTP ' + r.status + ')');
@@ -35,11 +35,11 @@
         '    <select class="metrics-in-method">' + sel + '</select>' +
         '  </div>' +
         '  <div class="form-group">' +
-        '    <label>URL <span class="meta">(обязательно)</span></label>' +
+        '    <label>Адрес (URL) <span class="meta">(обязательно)</span></label>' +
         '    <input type="text" class="metrics-in-url" placeholder="http://prometheus:9090/api/v1/query" autocomplete="off">' +
         '  </div>' +
         '  <div class="form-group">' +
-        '    <label>Query</label>' +
+        '    <label>Параметры запроса</label>' +
         '    <input type="text" class="metrics-in-query" placeholder="query=up или JSON-объект">' +
         '    <span class="metrics-field-hint">Строка вида key=value&amp;… или JSON-объект с ключами (значения — строка/число/логическое).</span>' +
         '  </div>' +

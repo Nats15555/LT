@@ -1,4 +1,4 @@
-﻿    async function loadDocker() {
+    async function loadDocker() {
       const contentEl = document.getElementById('dockerContent');
       const formBox = document.getElementById('dockerFormBox');
       const formTitle = document.getElementById('dockerFormTitle');
@@ -25,9 +25,9 @@
           return;
         }
         const rows = profiles.map(function (p) {
-          return '<tr><td>' + escapeHtml(p.name) + '</td><td>' + p.maxConcurrentContainers + '</td><td>' + (p.enabled ? 'да' : 'нет') + '</td><td><button type="button" class="btn btn-small btn-edit-docker" data-id="' + escapeAttr(p.id) + '">Править</button></td></tr>';
+          return '<tr><td>' + escapeHtml(dockerProfileDisplayName(p.name)) + '</td><td>' + p.maxConcurrentContainers + '</td><td>' + (p.enabled ? 'да' : 'нет') + '</td><td><button type="button" class="btn btn-small btn-edit-docker" data-id="' + escapeAttr(p.id) + '">Править</button></td></tr>';
         }).join('');
-        contentEl.innerHTML = '<table><thead><tr><th>Имя</th><th>Max параллельно</th><th>Вкл.</th><th></th></tr></thead><tbody>' + rows + '</tbody></table><p style="margin-top:0.75rem"><button type="button" class="btn" id="dockerNewBtn">Новый профиль</button></p>';
+        contentEl.innerHTML = '<table><thead><tr><th>Имя</th><th>Макс. параллельно</th><th>Вкл.</th><th></th></tr></thead><tbody>' + rows + '</tbody></table><p style="margin-top:0.75rem"><button type="button" class="btn" id="dockerNewBtn">Новый профиль</button></p>';
         formBox.style.display = 'none';
         deleteBtn.style.display = 'none';
         contentEl.querySelectorAll('.btn-edit-docker').forEach(function (btn) {
@@ -204,7 +204,7 @@
       }
       const dps = document.getElementById('dockerProfileSelect');
       if (!dps || !dps.value) {
-        msgEl.innerHTML = '<div class="msg err">Выберите Docker-профиль.</div>';
+        msgEl.innerHTML = '<div class="msg err">Выберите профиль Docker-выполнения.</div>';
         return;
       }
       fd.append('dockerExecutionProfileId', dps.value);
