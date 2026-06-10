@@ -8,6 +8,7 @@ import com.loadtest.metrics.service.MetricsCollectionRequestBuilder;
 import com.loadtest.metrics.service.MetricsCollectionService;
 import com.loadtest.metrics.service.PostMetricsPipelineService;
 import com.loadtest.metrics.service.TaskHistoryLifecycleService;
+import com.loadtest.metrics.util.DatabaseAvailabilityService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,6 +29,8 @@ import static org.mockito.Mockito.when;
 class MetricsCollectionConsumerTest {
 
     @Mock
+    private DatabaseAvailabilityService databaseAvailabilityService;
+    @Mock
     private MetricsCollectionRequestBuilder requestBuilder;
     @Mock
     private MetricsCollectionService metricsCollectionService;
@@ -45,11 +48,24 @@ class MetricsCollectionConsumerTest {
     @BeforeEach
     void setUp() {
         consumer = new MetricsCollectionConsumer(
+                databaseAvailabilityService,
                 requestBuilder,
                 metricsCollectionService,
                 testMetricsWriter,
                 postMetricsPipelineService,
                 taskHistoryLifecycleService);
+    }
+
+    @Test
+    void consume_databaseUnavailable_noAck() {
+        String taskId = "00000000-0000-0000-0000-000000000099";
+        MetricsCollectionEvent event = new MetricsCollectionEvent(taskId, 1L, 2L);
+        org.mockito.Mockito.doThrow(new com.loadtest.metrics.util.DatabaseUnavailableException("down"))
+                .when(databaseAvailabilityService).requireAvailable();
+
+        consumer.consume(event, acknowledgment);
+
+        verify(acknowledgment, org.mockito.Mockito.never()).acknowledge();
     }
 
     @Test

@@ -137,6 +137,9 @@ public class TestTaskExecutionService {
             updateHistoryAndRemoveTask(taskId, finalStatus, errorMessage, finishedAt);
         } catch (RuntimeException e) {
             log.error("Failed to update task status/history for task {}", taskId, e);
+            if (com.loadtest.execution.util.DatabaseAvailabilityService.isDatabaseAccessFailure(e)) {
+                throw e;
+            }
         }
     }
 
@@ -248,6 +251,9 @@ public class TestTaskExecutionService {
             log.info("Task {} moved to history with status {}", taskId, finalStatus);
         } catch (RuntimeException e) {
             log.error("Failed to move task {} to history", taskId, e);
+            if (com.loadtest.execution.util.DatabaseAvailabilityService.isDatabaseAccessFailure(e)) {
+                throw e;
+            }
         }
     }
 

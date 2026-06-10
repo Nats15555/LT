@@ -179,6 +179,7 @@ services:
     environment:
       <<: *java-env
       LOADTEST_APP_BASE_URL: http://app:8080
+      MANAGEMENT_HEALTH_ELASTICSEARCH_ENABLED: "false"
     depends_on:
       postgres:
         condition: service_healthy

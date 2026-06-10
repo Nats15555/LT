@@ -8,6 +8,8 @@ import com.loadtest.metrics.service.MetricsCollectionRequestBuilder;
 import com.loadtest.metrics.service.MetricsCollectionService;
 import com.loadtest.metrics.service.PostMetricsPipelineService;
 import com.loadtest.metrics.service.TaskHistoryLifecycleService;
+import com.loadtest.metrics.util.DatabaseAvailabilityService;
+import com.loadtest.metrics.util.DatabaseUnavailableException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -22,6 +24,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class MetricsCollectionConsumer {
 
+    private final DatabaseAvailabilityService databaseAvailabilityService;
     private final MetricsCollectionRequestBuilder requestBuilder;
     private final MetricsCollectionService metricsCollectionService;
     private final TestMetricsWriter testMetricsWriter;
@@ -38,6 +41,7 @@ public class MetricsCollectionConsumer {
                 event.taskId(), event.testStartTime(), event.testEndTime());
 
         try {
+            databaseAvailabilityService.requireAvailable();
             Optional<MetricsCollectionRequest> requestOpt = requestBuilder.tryBuildFromEvent(event);
             if (requestOpt.isEmpty()) {
                 postMetricsPipelineService.finishMetricsPhase(event.taskId(), null, false);
@@ -54,10 +58,27 @@ public class MetricsCollectionConsumer {
             }
             postMetricsPipelineService.finishMetricsPhase(event.taskId(), response, true);
             acknowledgment.acknowledge();
+        } catch (DatabaseUnavailableException e) {
+            log.warn("PostgreSQL unavailable for taskId={}, message will be redelivered: {}",
+                    event.taskId(), e.getMessage());
         } catch (RuntimeException e) {
+            if (DatabaseAvailabilityService.isDatabaseAccessFailure(e)) {
+                log.warn("Database error for taskId={}, message will be redelivered: {}",
+                        event.taskId(), e.getMessage());
+                return;
+            }
             log.error("Error processing metrics collection for taskId: {}", event.taskId(), e);
-            postMetricsPipelineService.failMetricsPhase(event.taskId(), e.getMessage());
-            acknowledgment.acknowledge();
+            try {
+                postMetricsPipelineService.failMetricsPhase(event.taskId(), e.getMessage());
+                acknowledgment.acknowledge();
+            } catch (RuntimeException failEx) {
+                if (DatabaseAvailabilityService.isDatabaseAccessFailure(failEx)) {
+                    log.warn("Could not persist FAILED status for taskId={}, message will be redelivered",
+                            event.taskId());
+                } else {
+                    throw failEx;
+                }
+            }
         }
     }
 }

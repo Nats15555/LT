@@ -2,6 +2,7 @@ package com.loadtest.app.service;
 
 import com.loadtest.app.dto.TestTaskEvent;
 import com.loadtest.app.persistence.TestTaskKafkaPendingRepository;
+import com.loadtest.app.util.DatabaseAvailabilityService;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
 import org.junit.jupiter.api.BeforeEach;
@@ -29,6 +30,7 @@ class TestTaskKafkaSlotDispatchServiceTest {
     @Mock private QueuePauseService queuePauseService;
     @Mock private KafkaOutboxService kafkaOutboxService;
     @Mock private TestTaskKafkaPendingRepository pendingRepository;
+    @Mock private DatabaseAvailabilityService databaseAvailabilityService;
     @Mock private EntityManager entityManager;
     @Mock private Query nativeQuery;
 
@@ -37,13 +39,14 @@ class TestTaskKafkaSlotDispatchServiceTest {
     @BeforeEach
     void setUp() {
         service = new TestTaskKafkaSlotDispatchService(
-                queuePauseService, kafkaOutboxService, pendingRepository, entityManager);
+                queuePauseService, kafkaOutboxService, pendingRepository, databaseAvailabilityService, entityManager);
         ReflectionTestUtils.setField(service, "batchSize", 32);
         ReflectionTestUtils.setField(service, "kafkaInflightTimeoutSeconds", 90);
     }
 
     @Test
     void dispatchAvailableSlots_skipsKafkaWhenQueuePausedButStillRecovers() {
+        when(databaseAvailabilityService.isAvailable()).thenReturn(true);
         when(queuePauseService.isQueuePaused()).thenReturn(true);
         when(entityManager.createNativeQuery(anyString())).thenReturn(nativeQuery);
         when(nativeQuery.setParameter(anyString(), any())).thenReturn(nativeQuery);
@@ -58,6 +61,7 @@ class TestTaskKafkaSlotDispatchServiceTest {
     @Test
     void dispatchAvailableSlots_sendsKafkaAndRemovesPending() {
         UUID taskId = UUID.randomUUID();
+        when(databaseAvailabilityService.isAvailable()).thenReturn(true);
         when(queuePauseService.isQueuePaused()).thenReturn(false);
         when(entityManager.createNativeQuery(anyString())).thenReturn(nativeQuery);
         when(nativeQuery.setParameter(anyString(), any())).thenReturn(nativeQuery);
@@ -74,6 +78,7 @@ class TestTaskKafkaSlotDispatchServiceTest {
     @Test
     void dispatchAvailableSlots_keepsPendingWhenKafkaFails() {
         UUID taskId = UUID.randomUUID();
+        when(databaseAvailabilityService.isAvailable()).thenReturn(true);
         when(queuePauseService.isQueuePaused()).thenReturn(false);
         when(entityManager.createNativeQuery(anyString())).thenReturn(nativeQuery);
         when(nativeQuery.setParameter(anyString(), any())).thenReturn(nativeQuery);
@@ -85,5 +90,15 @@ class TestTaskKafkaSlotDispatchServiceTest {
         service.dispatchAvailableSlots();
 
         verify(pendingRepository, never()).deleteById(taskId);
+    }
+
+    @Test
+    void dispatchAvailableSlots_skipsWhenDatabaseUnavailable() {
+        when(databaseAvailabilityService.isAvailable()).thenReturn(false);
+
+        service.dispatchAvailableSlots();
+
+        verify(entityManager, never()).createNativeQuery(anyString());
+        verify(kafkaOutboxService, never()).sendTestTaskEvent(anyString(), any());
     }
 }

@@ -1,6 +1,8 @@
 package com.loadtest.summarization.consumer;
 
 import com.loadtest.summarization.dto.SummarizationTaskEvent;
+import com.loadtest.summarization.util.DatabaseAvailabilityService;
+import com.loadtest.summarization.util.DatabaseUnavailableException;
 import com.loadtest.summarization.persistence.SummarizerConfig;
 import com.loadtest.summarization.persistence.SummarizerModelRepository;
 import com.loadtest.summarization.persistence.TaskHistoryRepository;
@@ -31,6 +33,7 @@ import static org.mockito.Mockito.doAnswer;
 @ExtendWith(MockitoExtension.class)
 class SummarizationTaskConsumerTest {
 
+    @Mock private DatabaseAvailabilityService databaseAvailabilityService;
     @Mock private TaskHistoryRepository taskHistoryRepository;
     @Mock private SummarizerModelRepository summarizerModelRepository;
     @Mock private PromptBuilder promptBuilder;
@@ -44,6 +47,7 @@ class SummarizationTaskConsumerTest {
     @BeforeEach
     void setUp() {
         consumer = new SummarizationTaskConsumer(
+                databaseAvailabilityService,
                 taskHistoryRepository,
                 summarizerModelRepository,
                 promptBuilder,
@@ -51,6 +55,48 @@ class SummarizationTaskConsumerTest {
                 testSummaryWriter,
                 taskHistoryLifecycleService
         );
+    }
+
+    @Test
+    void consume_terminalStatus_skipsAndAcks() {
+        UUID id = UUID.randomUUID();
+        when(taskHistoryRepository.hasTerminalStatus(id)).thenReturn(true);
+
+        consumer.consume(new SummarizationTaskEvent(id.toString(), "route"), acknowledgment);
+
+        verify(acknowledgment).acknowledge();
+        verify(testSummaryWriter, never()).saveSummary(any(), any(), any(), any(), any());
+        verifyNoInteractions(llmClient);
+    }
+
+    @Test
+    void consume_terminalStatus_forceRetry_runsSummarization() {
+        UUID id = UUID.randomUUID();
+        SummarizerConfig cfg = SummarizerConfig.builder()
+                .id(UUID.randomUUID())
+                .name("route")
+                .provider("OPENAI")
+                .baseUrl("http://litellm:4000")
+                .modelId("gpt")
+                .build();
+        when(summarizerModelRepository.findByName("route")).thenReturn(Optional.of(cfg));
+        when(promptBuilder.buildPrompt(id)).thenReturn("p");
+        when(llmClient.summarize(cfg, "p")).thenReturn("ok");
+
+        consumer.consume(new SummarizationTaskEvent(id.toString(), "route", null, true), acknowledgment);
+
+        verify(llmClient).summarize(cfg, "p");
+        verify(acknowledgment).acknowledge();
+    }
+
+    @Test
+    void consume_databaseUnavailable_noAck() {
+        UUID id = UUID.randomUUID();
+        doThrow(new DatabaseUnavailableException("down")).when(databaseAvailabilityService).requireAvailable();
+
+        consumer.consume(new SummarizationTaskEvent(id.toString(), "route"), acknowledgment);
+
+        verify(acknowledgment, never()).acknowledge();
     }
 
     @Test
@@ -243,7 +289,7 @@ class SummarizationTaskConsumerTest {
     }
 
     @Test
-    void consume_whenFailedSaveThrows_stillAcknowledges() {
+    void consume_whenFailedSaveThrows_doesNotAcknowledge() {
         UUID id = UUID.randomUUID();
         SummarizerConfig cfg = SummarizerConfig.builder()
                 .id(UUID.randomUUID())
@@ -262,8 +308,9 @@ class SummarizationTaskConsumerTest {
             return null;
         }).when(testSummaryWriter).saveSummary(any(), any(), any(), any(), any());
 
-        consumer.consume(new SummarizationTaskEvent(id.toString(), "x"), acknowledgment);
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class,
+                () -> consumer.consume(new SummarizationTaskEvent(id.toString(), "x"), acknowledgment));
 
-        verify(acknowledgment).acknowledge();
+        verify(acknowledgment, never()).acknowledge();
     }
 }

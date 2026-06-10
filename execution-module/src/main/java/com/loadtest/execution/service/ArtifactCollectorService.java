@@ -116,12 +116,18 @@ public class ArtifactCollectorService {
     }
 
     private void saveOneArtifact(UUID taskId, ArtifactFile af) throws IOException {
+        String fileName = af.path().getFileName().toString();
+        if (artifactRepository.existsByTaskIdAndFileName(taskId, fileName)) {
+            log.info("Artifact already saved (taskId={}): {}, skipping duplicate", taskId, fileName);
+            deleteLocalArtifactQuietly(af.path());
+            return;
+        }
         byte[] original = Files.readAllBytes(af.path());
         byte[] gz = gzip(original);
         TestArtifactEntity entity = TestArtifactEntity.builder()
                 .id(UUID.randomUUID())
                 .taskId(taskId)
-                .fileName(af.path().getFileName().toString())
+                .fileName(fileName)
                 .contentEncoding("gzip")
                 .fileContent(gz)
                 .originalSizeBytes((long) original.length)

@@ -3,6 +3,11 @@ spring:
     activate:
       on-profile: docker
 
+management:
+  health:
+    elasticsearch:
+      enabled: false
+
 metrics:
   host-overrides:
     localhost: host.docker.internal

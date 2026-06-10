@@ -188,12 +188,18 @@ public class LoadTestUploadService {
     }
 
     private ResponseEntity<Map<String, Object>> validateScenarioFileSize(MultipartFile file) {
-        long declaredSize = FileValidationHelper.resolveDeclaredSizeBytes(file);
-        if (declaredSize >= 0) {
-            if (declaredSize > maxScenarioFileSizeBytes) {
-                return fileTooLargeResponse(declaredSize);
+        try {
+            long actualBytes = file.getBytes().length;
+            if (actualBytes > maxScenarioFileSizeBytes) {
+                return fileTooLargeResponse(actualBytes);
             }
-            return null;
+        } catch (IOException e) {
+            return ResponseHelper.buildErrorResponse(HttpStatus.BAD_REQUEST,
+                    ApiMessages.Upload.FAILED_UPLOAD_PREFIX + e.getMessage());
+        }
+        long declaredSize = FileValidationHelper.resolveDeclaredSizeBytes(file);
+        if (declaredSize >= 0 && declaredSize > maxScenarioFileSizeBytes) {
+            return fileTooLargeResponse(declaredSize);
         }
         return null;
     }

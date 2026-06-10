@@ -75,7 +75,8 @@ class LoadTestControllerDirectUnitTest {
 
         ResponseEntity<Map<String, Object>> resp = controller.uploadTestFile(
                 bad, "k6", "run", 5, null, null, null, TEST_PROFILE_ID);
-        assertThat(resp.getStatusCode().value()).isEqualTo(500);
+        assertThat(resp.getStatusCode().value()).isEqualTo(400);
+        assertThat(resp.getBody()).containsEntry("status", "error");
     }
 
     @Test

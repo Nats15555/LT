@@ -2,6 +2,7 @@ package com.loadtest.app.service;
 
 import com.loadtest.app.dto.TestTaskEvent;
 import com.loadtest.app.persistence.TestTaskKafkaPendingRepository;
+import com.loadtest.app.util.DatabaseAvailabilityService;
 import com.loadtest.app.util.SlotDispatchNativeQueryParams;
 import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
@@ -86,6 +87,7 @@ public class TestTaskKafkaSlotDispatchService {
     private final QueuePauseService queuePauseService;
     private final KafkaOutboxService kafkaOutboxService;
     private final TestTaskKafkaPendingRepository pendingRepository;
+    private final DatabaseAvailabilityService databaseAvailabilityService;
     private final EntityManager entityManager;
 
     @Value("${loadtest.queue.slot-dispatch-batch-size:32}")
@@ -102,6 +104,10 @@ public class TestTaskKafkaSlotDispatchService {
 
     @Transactional
     public void dispatchAvailableSlots() {
+        if (!databaseAvailabilityService.isAvailable()) {
+            log.warn("PostgreSQL unavailable — slot dispatch skipped");
+            return;
+        }
         recoverStalePendingTasks();
         if (queuePauseService.isQueuePaused()) {
             return;

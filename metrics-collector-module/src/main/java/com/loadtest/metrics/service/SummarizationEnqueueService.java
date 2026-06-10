@@ -2,6 +2,9 @@ package com.loadtest.metrics.service;
 
 import com.loadtest.metrics.dto.SummarizationTaskEvent;
 import com.loadtest.metrics.persistence.SummarizerProviderRepository;
+import com.loadtest.metrics.persistence.TestTaskHistoryEntity;
+import com.loadtest.metrics.persistence.TestTaskHistoryJpaRepository;
+import com.loadtest.metrics.util.TaskLifecycleStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,6 +26,7 @@ public class SummarizationEnqueueService {
     private final KafkaOutboxService kafkaOutboxService;
     private final SummarizerProviderRepository summarizerProviderRepository;
     private final ExternalSummarizationPendingService externalSummarizationPendingService;
+    private final TestTaskHistoryJpaRepository testTaskHistoryJpaRepository;
 
     private final WebClient webClient = WebClient.builder()
             .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(2 * 1024 * 1024))
@@ -45,6 +49,10 @@ public class SummarizationEnqueueService {
         }
         if (!summarizerProviderRepository.isSummarizerEnabled(summarizer)) {
             log.info("Summarization skipped: route «{}» disabled (enabled=false), taskId={}", summarizer, taskIdStr);
+            return;
+        }
+        if (hasTerminalStatus(taskId)) {
+            log.info("Summarization skipped: taskId={} already COMPLETED or FAILED (pipeline dedup)", taskIdStr);
             return;
         }
         if (summarizerProviderRepository.findProviderBySummarizerName(summarizer)
@@ -135,5 +143,12 @@ public class SummarizationEnqueueService {
             log.warn("Failed to trigger external dispatch for taskId={}: {}", taskId, e.getMessage());
             return false;
         }
+    }
+
+    private boolean hasTerminalStatus(UUID taskId) {
+        return testTaskHistoryJpaRepository.findById(taskId)
+                .map(TestTaskHistoryEntity::getFinalStatus)
+                .filter(TaskLifecycleStatus::isTerminal)
+                .isPresent();
     }
 }

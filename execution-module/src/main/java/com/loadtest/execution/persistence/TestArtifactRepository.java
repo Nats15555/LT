@@ -6,4 +6,6 @@ import java.util.List;
 import java.util.UUID;
 
 public interface TestArtifactRepository extends JpaRepository<TestArtifactEntity, UUID> {
+
+    boolean existsByTaskIdAndFileName(UUID taskId, String fileName);
 }

@@ -95,6 +95,10 @@ public class TestMetricsWriter {
             String queryParams,
             String metricsDataJson) {
         String sourceType = truncateSourceType(key);
+        if (testMetricsJpaRepository.existsByTaskIdAndSourceType(taskId, sourceType)) {
+            log.info("Metrics already saved: taskId={}, sourceType={}, skipping duplicate", taskId, sourceType);
+            return true;
+        }
         try {
             testMetricsJpaRepository.save(TestMetricsEntity.builder()
                     .id(UUID.randomUUID())
@@ -109,7 +113,15 @@ public class TestMetricsWriter {
             return true;
         } catch (RuntimeException e) {
             log.error("Failed to insert test_metrics for taskId={}, sourceType={}: {}", taskId, sourceType, e.getMessage());
-            return false;
+            throw new TestMetricsPersistenceException(
+                    "Failed to insert test_metrics for taskId=" + taskId + ", sourceType=" + sourceType, e);
+        }
+    }
+
+    public static class TestMetricsPersistenceException extends RuntimeException {
+
+        public TestMetricsPersistenceException(String message, Throwable cause) {
+            super(message, cause);
         }
     }
 

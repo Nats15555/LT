@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -68,7 +69,7 @@ class TestMetricsWriterTest {
     }
 
     @Test
-    void saveMetrics_skipsOnInsertError() {
+    void saveMetrics_throwsOnInsertError() {
         String taskId = UUID.randomUUID().toString();
         MetricsCollectionRequest req = new MetricsCollectionRequest(
                 taskId,
@@ -78,7 +79,8 @@ class TestMetricsWriterTest {
                 taskId, null, null, Map.of("n", Map.of("v", 1)), null, null, null);
         when(metricsCollectionService.getEffectiveUrl(any())).thenReturn("http://effective");
         doThrow(new RuntimeException("db")).when(testMetricsJpaRepository).save(any(TestMetricsEntity.class));
-        assertThat(writer.saveMetrics(taskId, req, resp)).isZero();
+        assertThatThrownBy(() -> writer.saveMetrics(taskId, req, resp))
+                .isInstanceOf(TestMetricsWriter.TestMetricsPersistenceException.class);
     }
 
     @Test

@@ -8,13 +8,15 @@ import com.loadtest.app.service.LoadTestUploadService;
 import com.loadtest.app.service.SummarizerService;
 import com.loadtest.app.service.TestQueueService;
 import com.loadtest.app.util.MetricsConfigParser;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.mock.web.MockMultipartFile;
-import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.OffsetDateTime;
@@ -30,8 +32,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(controllers = LoadTestController.class)
 @Import(LoadTestUploadService.class)
-@TestPropertySource(properties = "loadtest.upload.max-scenario-file-size-bytes=64")
 class LoadTestUploadMaxSizeWebMvcTest {
+
+    @DynamicPropertySource
+    static void uploadLimits(DynamicPropertyRegistry registry) {
+        registry.add("loadtest.upload.max-scenario-file-size-bytes", () -> 64);
+    }
 
     @Autowired
     private MockMvc mockMvc;
@@ -49,6 +55,13 @@ class LoadTestUploadMaxSizeWebMvcTest {
     @MockBean
     private CustomSummarizationPromptStore customSummarizationPromptStore;
 
+    private static final UUID PROFILE_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
+
+    @BeforeEach
+    void setUp() {
+        when(dockerExecutionProfileService.resolveProfileIdForUpload(PROFILE_ID.toString())).thenReturn(PROFILE_ID);
+    }
+
     @Test
     void upload_rejectsFileExceedingMaxScenarioSize() {
         when(loadTestToolService.getToolByName("K6")).thenReturn(k6Tool());
@@ -58,7 +71,8 @@ class LoadTestUploadMaxSizeWebMvcTest {
                         .file(file)
                         .param("tool", "K6")
                         .param("command", "k6 run {fileName}")
-                        .param("expectedDurationSeconds", "10"))
+                        .param("expectedDurationSeconds", "10")
+                        .param("dockerExecutionProfileId", PROFILE_ID.toString()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.status").value("error"))
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("exceeds the maximum")));

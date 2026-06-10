@@ -8,6 +8,8 @@ import com.loadtest.summarization.persistence.TestSummaryWriter;
 import com.loadtest.summarization.service.OpenAiCompatibleClient;
 import com.loadtest.summarization.service.PromptBuilder;
 import com.loadtest.summarization.service.TaskHistoryLifecycleService;
+import com.loadtest.summarization.util.DatabaseAvailabilityService;
+import com.loadtest.summarization.util.DatabaseUnavailableException;
 import com.loadtest.summarization.util.TestSummaryConstants;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,6 +26,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class SummarizationTaskConsumer {
 
+    private final DatabaseAvailabilityService databaseAvailabilityService;
     private final TaskHistoryRepository taskHistoryRepository;
     private final SummarizerModelRepository summarizerModelRepository;
     private final PromptBuilder promptBuilder;
@@ -43,8 +46,27 @@ public class SummarizationTaskConsumer {
             acknowledgment.acknowledge();
             return;
         }
-        executeSummarization(event, taskIdOpt.get());
-        acknowledgment.acknowledge();
+        UUID taskId = taskIdOpt.get();
+        try {
+            databaseAvailabilityService.requireAvailable();
+            if (!event.isForceRetry() && taskHistoryRepository.hasTerminalStatus(taskId)) {
+                log.info("Skip duplicate summarization for taskId={}: history already COMPLETED or FAILED",
+                        taskId);
+                acknowledgment.acknowledge();
+                return;
+            }
+            executeSummarization(event, taskId);
+            acknowledgment.acknowledge();
+        } catch (DatabaseUnavailableException e) {
+            log.warn("PostgreSQL unavailable for taskId={}, message will be redelivered: {}",
+                    taskId, e.getMessage());
+        } catch (RuntimeException e) {
+            if (DatabaseAvailabilityService.isDatabaseAccessFailure(e)) {
+                log.warn("Database error for taskId={}, message will be redelivered: {}", taskId, e.getMessage());
+                return;
+            }
+            throw e;
+        }
     }
 
     private Optional<UUID> parseTaskId(String taskIdStr) {
@@ -64,25 +86,26 @@ public class SummarizationTaskConsumer {
             return;
         }
 
-        try {
-            SummarizerConfig config = summarizerModelRepository.findByName(summarizerName)
-                    .orElseThrow(() -> new IllegalStateException(
-                            "Summarizer not found or disabled: " + summarizerName));
-
-            if ("EXTERNAL".equalsIgnoreCase(config.getProvider())) {
-                log.info("Summarizer {} is EXTERNAL — сообщение из Kafka игнорируется "
-                                + "(суммаризация через ingest+callback app-module; событие в топик не должно слаться "
-                                + "metrics-collector для EXTERNAL)",
-                        summarizerName);
-                return;
-            }
-
-            taskHistoryLifecycleService.markAnalyzing(taskId);
-            String prompt = resolvePrompt(event, taskId);
-            runLlmSummarization(taskId, summarizerName, config, prompt);
-        } catch (RuntimeException e) {
-            handleSummarizationFailure(taskId, null, e);
+        SummarizerConfig config = summarizerModelRepository.findByName(summarizerName).orElse(null);
+        if (config == null) {
+            IllegalStateException e = new IllegalStateException(
+                    "Summarizer not found or disabled: " + summarizerName);
+            saveFailedSummary(taskId, null, e);
+            taskHistoryLifecycleService.markFailed(taskId, e.getMessage());
+            return;
         }
+
+        if ("EXTERNAL".equalsIgnoreCase(config.getProvider())) {
+            log.info("Summarizer {} is EXTERNAL — сообщение из Kafka игнорируется "
+                            + "(суммаризация через ingest+callback app-module; событие в топик не должно слаться "
+                            + "metrics-collector для EXTERNAL)",
+                    summarizerName);
+            return;
+        }
+
+        taskHistoryLifecycleService.markAnalyzing(taskId);
+        String prompt = resolvePrompt(event, taskId);
+        runLlmSummarization(taskId, summarizerName, config, prompt);
     }
 
     private void runLlmSummarization(
@@ -134,6 +157,9 @@ public class SummarizationTaskConsumer {
     }
 
     private void handleSummarizationFailure(UUID taskId, String promptUsed, RuntimeException e) {
+        if (DatabaseAvailabilityService.isDatabaseAccessFailure(e)) {
+            throw e;
+        }
         if (e instanceof IllegalArgumentException) {
             log.warn("Суммаризация не выполнена для taskId={}: {}", taskId, e.getMessage());
         } else {
@@ -145,15 +171,11 @@ public class SummarizationTaskConsumer {
     }
 
     private void saveFailedSummary(UUID taskId, String promptUsed, RuntimeException e) {
-        try {
-            String error = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-            Map<String, Object> failedSummaryData = promptUsed != null && !promptUsed.isBlank()
-                    ? Map.of("error", error, "promptUsed", promptUsed)
-                    : Map.of("error", error);
-            testSummaryWriter.saveSummary(taskId, TestSummaryConstants.TYPE_AI_SUMMARY, failedSummaryData,
-                    TestSummaryConstants.STATUS_FAILED, e.getMessage());
-        } catch (RuntimeException ex) {
-            log.warn("Failed to save FAILED summary: {}", ex.getMessage());
-        }
+        String error = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+        Map<String, Object> failedSummaryData = promptUsed != null && !promptUsed.isBlank()
+                ? Map.of("error", error, "promptUsed", promptUsed)
+                : Map.of("error", error);
+        testSummaryWriter.saveSummary(taskId, TestSummaryConstants.TYPE_AI_SUMMARY, failedSummaryData,
+                TestSummaryConstants.STATUS_FAILED, e.getMessage());
     }
 }

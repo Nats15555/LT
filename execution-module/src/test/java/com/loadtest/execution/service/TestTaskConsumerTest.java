@@ -1,5 +1,7 @@
 package com.loadtest.execution.service;
 
+import com.loadtest.execution.util.DatabaseAvailabilityService;
+import com.loadtest.execution.util.DatabaseUnavailableException;
 import com.loadtest.execution.dto.ExecutionResponse;
 import com.loadtest.execution.dto.TaskProcessOutcome;
 import com.loadtest.execution.dto.TestTaskEvent;
@@ -17,6 +19,7 @@ import java.util.UUID;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -25,6 +28,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class TestTaskConsumerTest {
 
+    @Mock private DatabaseAvailabilityService databaseAvailabilityService;
     @Mock private TestTaskExecutionService testTaskExecutionService;
     @Mock private MetricsTriggerService metricsTriggerService;
     @Mock private Acknowledgment acknowledgment;
@@ -33,7 +37,18 @@ class TestTaskConsumerTest {
 
     @BeforeEach
     void setUp() {
-        consumer = new TestTaskConsumer(testTaskExecutionService, metricsTriggerService);
+        consumer = new TestTaskConsumer(databaseAvailabilityService, testTaskExecutionService, metricsTriggerService);
+    }
+
+    @Test
+    void databaseUnavailable_doesNotAcknowledge() {
+        UUID taskId = UUID.randomUUID();
+        doThrow(new DatabaseUnavailableException("down")).when(databaseAvailabilityService).requireAvailable();
+
+        consumer.consumeTestTaskEvent(new TestTaskEvent(taskId.toString()), acknowledgment);
+
+        verify(testTaskExecutionService, never()).execute(any());
+        verify(acknowledgment, never()).acknowledge();
     }
 
     @Test

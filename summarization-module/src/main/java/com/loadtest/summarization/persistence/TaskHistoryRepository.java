@@ -24,4 +24,16 @@ public class TaskHistoryRepository {
             return Optional.empty();
         }
     }
+
+    public boolean hasTerminalStatus(UUID taskId) {
+        try {
+            return testTaskHistoryJpaRepository.findById(taskId)
+                    .map(TestTaskHistoryEntity::getFinalStatus)
+                    .filter(com.loadtest.summarization.util.TaskLifecycleStatus::isTerminal)
+                    .isPresent();
+        } catch (RuntimeException e) {
+            log.warn("Failed to load final_status for taskId: {}", taskId, e);
+            return false;
+        }
+    }
 }

@@ -268,7 +268,7 @@ public class TasksController {
         }
 
         kafkaOutboxService.sendSummarizationTaskEvent(taskId.toString(),
-                new SummarizationTaskEvent(taskId.toString(), summarizerTrim, customPrompt));
+                new SummarizationTaskEvent(taskId.toString(), summarizerTrim, customPrompt, true));
         log.info("Summarization requested for taskId={}, summarizer={}", taskId, summarizerTrim);
         return ResponseEntity.accepted().body(ResponseHelper.messageBody(ApiMessages.Tasks.SUMMARIZATION_REQUESTED));
     }

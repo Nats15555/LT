@@ -2,6 +2,8 @@ package com.loadtest.metrics.service;
 
 import com.loadtest.metrics.dto.SummarizationTaskEvent;
 import com.loadtest.metrics.persistence.SummarizerProviderRepository;
+import com.loadtest.metrics.persistence.TestTaskHistoryEntity;
+import com.loadtest.metrics.persistence.TestTaskHistoryJpaRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -34,6 +36,8 @@ class SummarizationEnqueueServiceTest {
     private SummarizerProviderRepository summarizerProviderRepository;
     @Mock
     private ExternalSummarizationPendingService externalSummarizationPendingService;
+    @Mock
+    private TestTaskHistoryJpaRepository testTaskHistoryJpaRepository;
 
     private SummarizationEnqueueService service;
 
@@ -42,7 +46,8 @@ class SummarizationEnqueueServiceTest {
         service = new SummarizationEnqueueService(
                 kafkaOutboxService,
                 summarizerProviderRepository,
-                externalSummarizationPendingService);
+                externalSummarizationPendingService,
+                testTaskHistoryJpaRepository);
         ReflectionTestUtils.setField(service, "appBaseUrl", "http://127.0.0.1:1");
     }
 
@@ -149,5 +154,17 @@ class SummarizationEnqueueServiceTest {
 
         verify(externalSummarizationPendingService, times(1)).registerPendingWindow(id, "ext");
         verify(externalSummarizationPendingService, never()).failPendingWindow(eq(id), any());
+    }
+
+    @Test
+    void enqueueSummarizationForTask_terminalStatus_skipsKafka() {
+        UUID id = UUID.randomUUID();
+        when(summarizerProviderRepository.isSummarizerEnabled("route")).thenReturn(true);
+        when(testTaskHistoryJpaRepository.findById(id)).thenReturn(Optional.of(
+                TestTaskHistoryEntity.builder().id(id).finalStatus("COMPLETED").build()));
+
+        service.enqueueSummarizationForTask(id.toString(), "route");
+
+        verify(kafkaOutboxService, never()).sendSummarizationEvent(any(), any());
     }
 }
