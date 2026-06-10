@@ -9,8 +9,9 @@ group = "com.loadtest"
 version = "1.0.0"
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(21))
+    }
 }
 
 repositories {
@@ -31,11 +32,6 @@ dependencies {
     annotationProcessor("org.projectlombok:lombok")
     
     testImplementation("org.springframework.boot:spring-boot-starter-test")
-}
-
-tasks.withType<JavaCompile> {
-    sourceCompatibility = "17"
-    targetCompatibility = "17"
 }
 
 tasks.test {
