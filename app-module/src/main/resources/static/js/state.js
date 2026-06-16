@@ -1,4 +1,4 @@
-﻿    const API = (window.location.port === '8080' ? '' : 'http://localhost:8080') + '/api/v1/loadtest';
+﻿    const API = '/api/v1/loadtest';
 
     (function initThemeToggle() {
       const KEY = 'loadtest-theme';
