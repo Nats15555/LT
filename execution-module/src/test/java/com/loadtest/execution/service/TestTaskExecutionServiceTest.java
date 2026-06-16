@@ -86,6 +86,8 @@ class TestTaskExecutionServiceTest {
                 .status(TestTaskStatus.PROCESSING)
                 .createdAt(OffsetDateTime.now())
                 .updatedAt(OffsetDateTime.now())
+                .lockedAt(OffsetDateTime.now())
+                .expectedDurationSeconds(3600)
                 .testTool("k6")
                 .testFileName("t.js")
                 .testFileContentBase64("YQ==")
@@ -98,6 +100,64 @@ class TestTaskExecutionServiceTest {
 
         assertThat(r.getKind()).isEqualTo(TestTaskRunResult.Kind.DUPLICATE);
         verify(processor, never()).process(any());
+    }
+
+    @Test
+    void execute_reclaimsStaleProcessing_andRuns() throws Exception {
+        UUID taskId = UUID.randomUUID();
+        UUID profileId = UUID.randomUUID();
+        ReflectionTestUtils.setField(service, "staleProcessingGraceSeconds", 600L);
+        when(entityManager.createNativeQuery(anyString())).thenReturn(nativeQuery);
+        when(nativeQuery.setParameter(anyString(), any())).thenReturn(nativeQuery);
+        when(nativeQuery.executeUpdate()).thenReturn(0, 1);
+
+        TestTaskEntity task = TestTaskEntity.builder()
+                .id(taskId)
+                .status(TestTaskStatus.PROCESSING)
+                .createdAt(OffsetDateTime.now().minusHours(2))
+                .updatedAt(OffsetDateTime.now().minusHours(2))
+                .lockedAt(OffsetDateTime.now().minusHours(2))
+                .expectedDurationSeconds(60)
+                .testTool("k6")
+                .testFileName("t.js")
+                .testFileContentBase64("YQ==")
+                .command("run")
+                .metricsConfig(null)
+                .dockerExecutionProfileId(profileId)
+                .build();
+        when(taskRepository.findById(taskId)).thenReturn(Optional.of(task));
+
+        when(historyRepository.findById(taskId))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(TestTaskHistoryEntity.builder()
+                        .id(taskId)
+                        .finalStatus("PROCESSING")
+                        .createdAt(task.getCreatedAt())
+                        .movedAt(OffsetDateTime.now())
+                        .testTool("k6")
+                        .testFileName("t.js")
+                        .testFileContentBase64("YQ==")
+                        .command("run")
+                        .expectedDurationSeconds(60)
+                        .dockerExecutionProfileId(profileId)
+                        .build()));
+
+        when(dockerExecutionProfileRepository.findById(profileId))
+                .thenReturn(Optional.of(DockerExecutionProfileEntity.builder()
+                        .id(profileId)
+                        .name("default")
+                        .enabled(true)
+                        .maxConcurrentContainers(4)
+                        .build()));
+
+        ExecutionResponse resp = new ExecutionResponse("success", null, null, null, null, 3L, null, null);
+        when(processor.process(any(TestTaskMessage.class)))
+                .thenReturn(new TaskProcessOutcome(resp, 100L, 200L));
+
+        TestTaskRunResult r = service.execute(new TestTaskEvent(taskId.toString()));
+
+        assertThat(r.getKind()).isEqualTo(TestTaskRunResult.Kind.COMPLETED);
+        verify(processor).process(any(TestTaskMessage.class));
     }
 
     @Test

@@ -33,6 +33,8 @@ kafka:
     metrics-collection-tasks: metrics-collection-tasks
 
 loadtest:
+  execution:
+    stale-processing-grace-seconds: ${LOADTEST_EXECUTION_STALE_PROCESSING_GRACE_SECONDS:600}
   summarization:
     default-summarizer-name: ${LOADTEST_DEFAULT_SUMMARIZER_NAME:}
 

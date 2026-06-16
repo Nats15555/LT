@@ -13,6 +13,7 @@ import com.loadtest.execution.persistence.TestTaskHistoryEntity;
 import com.loadtest.execution.persistence.TestTaskHistoryRepository;
 import com.loadtest.execution.persistence.TestTaskRepository;
 import com.loadtest.execution.persistence.TestTaskStatus;
+import com.loadtest.execution.util.StaleProcessingLockEvaluator;
 import com.loadtest.execution.util.TaskLifecycleStatus;
 import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
@@ -39,6 +40,9 @@ public class TestTaskExecutionService {
     @Value("${loadtest.summarization.default-summarizer-name:}")
     private String defaultSummarizerName;
 
+    @Value("${loadtest.execution.stale-processing-grace-seconds:600}")
+    private long staleProcessingGraceSeconds;
+
     private final TestTaskRepository taskRepository;
     private final TestTaskHistoryRepository historyRepository;
     private final TestTaskProcessor processor;
@@ -63,9 +67,15 @@ public class TestTaskExecutionService {
         if (!claimed) {
             TestTaskEntity existing = taskRepository.findById(taskId).orElse(null);
             if (existing != null) {
-                log.warn("Task {} already in status {} (claimed or completed), skipping. "
-                                + "Expected when the same event is redelivered or processed by another instance.",
-                        taskId, existing.getStatus());
+                if (existing.getStatus() == TestTaskStatus.PROCESSING
+                        && !isStaleProcessingLock(existing, now)) {
+                    log.warn("Task {} is actively PROCESSING (lock not stale), skipping duplicate Kafka delivery",
+                            taskId);
+                } else {
+                    log.warn("Task {} already in status {} (claimed or completed), skipping. "
+                                    + "Expected when the same event is redelivered or processed by another instance.",
+                            taskId, existing.getStatus());
+                }
             } else {
                 log.warn("Task {} not found in database, skipping (row may not be visible yet or already moved to history)",
                         taskId);
@@ -257,31 +267,27 @@ public class TestTaskExecutionService {
         }
     }
 
+    private boolean isStaleProcessingLock(TestTaskEntity row, OffsetDateTime now) {
+        return row.getStatus() == TestTaskStatus.PROCESSING
+                && StaleProcessingLockEvaluator.isStale(
+                row.getLockedAt(), row.getExpectedDurationSeconds(), now, staleProcessingGraceSeconds);
+    }
+
     private boolean claimTaskRespectingDockerConcurrency(UUID taskId, OffsetDateTime now) throws InterruptedException {
         while (true) {
-            int updated = entityManager.createNativeQuery("""
-                            UPDATE test_task t
-                            SET status = :processing, updated_at = :now,
-                                locked_at = :now, locked_by = 'execution-service'
-                            FROM docker_execution_profile p
-                            WHERE t.id = :id AND t.status = :pending
-                              AND t.docker_execution_profile_id = p.id
-                              AND (
-                                SELECT COUNT(*) FROM test_task x
-                                WHERE x.docker_execution_profile_id = t.docker_execution_profile_id
-                                  AND x.status = :processing
-                              ) < p.max_concurrent_containers
-                            """)
-                    .setParameter("id", taskId)
-                    .setParameter("now", now)
-                    .setParameter("processing", STATUS_PROCESSING)
-                    .setParameter("pending", STATUS_PENDING)
-                    .executeUpdate();
-            if (updated > 0) {
+            if (tryClaimPendingTask(taskId, now) > 0) {
                 return true;
             }
             TestTaskEntity row = taskRepository.findById(taskId).orElse(null);
             if (row == null) {
+                return false;
+            }
+            if (row.getStatus() == TestTaskStatus.PROCESSING) {
+                if (isStaleProcessingLock(row, now) && tryReclaimStaleProcessingTask(taskId, now) > 0) {
+                    log.warn("Reclaimed stale PROCESSING task {} (locked_at={}, expected_duration={}s, grace={}s)",
+                            taskId, row.getLockedAt(), row.getExpectedDurationSeconds(), staleProcessingGraceSeconds);
+                    return true;
+                }
                 return false;
             }
             if (row.getStatus() != TestTaskStatus.PENDING) {
@@ -290,6 +296,45 @@ public class TestTaskExecutionService {
             log.info("Docker profile concurrency full for task {}, retry in {} ms", taskId, DOCKER_SLOT_WAIT_MS);
             sleepForDockerRetry();
         }
+    }
+
+    private int tryClaimPendingTask(UUID taskId, OffsetDateTime now) {
+        return entityManager.createNativeQuery("""
+                        UPDATE test_task t
+                        SET status = :processing, updated_at = :now,
+                            locked_at = :now, locked_by = 'execution-service'
+                        FROM docker_execution_profile p
+                        WHERE t.id = :id AND t.status = :pending
+                          AND t.docker_execution_profile_id = p.id
+                          AND (
+                            SELECT COUNT(*) FROM test_task x
+                            WHERE x.docker_execution_profile_id = t.docker_execution_profile_id
+                              AND x.status = :processing
+                          ) < p.max_concurrent_containers
+                        """)
+                .setParameter("id", taskId)
+                .setParameter("now", now)
+                .setParameter("processing", STATUS_PROCESSING)
+                .setParameter("pending", STATUS_PENDING)
+                .executeUpdate();
+    }
+
+    private int tryReclaimStaleProcessingTask(UUID taskId, OffsetDateTime now) {
+        return entityManager.createNativeQuery("""
+                        UPDATE test_task t
+                        SET status = :processing, updated_at = :now,
+                            locked_at = :now, locked_by = 'execution-service'
+                        WHERE t.id = :id
+                          AND t.status = :processing
+                          AND t.locked_at IS NOT NULL
+                          AND t.locked_at + (COALESCE(t.expected_duration_seconds, 60) + :graceSeconds)
+                              * INTERVAL '1 second' <= :now
+                        """)
+                .setParameter("id", taskId)
+                .setParameter("now", now)
+                .setParameter("processing", STATUS_PROCESSING)
+                .setParameter("graceSeconds", staleProcessingGraceSeconds)
+                .executeUpdate();
     }
 
     protected void sleepForDockerRetry() throws InterruptedException {
