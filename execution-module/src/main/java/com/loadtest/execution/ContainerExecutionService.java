@@ -20,6 +20,7 @@ import com.github.dockerjava.core.DockerClientBuilder;
 import com.github.dockerjava.httpclient5.ApacheDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
 import com.loadtest.execution.util.ExecutionPlaceholderKeys;
+import com.loadtest.execution.util.LoadTestContainerLabels;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -33,6 +34,7 @@ import java.nio.file.Paths;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -43,6 +45,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 import com.loadtest.execution.persistence.DockerExecutionProfileEntity;
 import com.loadtest.execution.persistence.DockerExecutionProfileRepository;
@@ -128,6 +131,29 @@ public class ContainerExecutionService {
     DockerClient dockerClientForUri(String explicitDockerHostUri) {
         String cacheKey = isBlankDockerHostUri(explicitDockerHostUri) ? "" : explicitDockerHostUri.trim();
         return dockerClients.computeIfAbsent(cacheKey, k -> createDockerClient(k.isEmpty() ? null : k));
+    }
+
+    public void forEachDistinctDockerClient(Consumer<DockerClient> action) {
+        Set<String> seenHosts = new HashSet<>();
+        visitDockerHostForCleanup(null, seenHosts, action);
+        for (DockerExecutionProfileEntity profile : dockerExecutionProfileRepository.findAll()) {
+            String hostUri = profile.getDockerHostUri();
+            if (hostUri != null && !hostUri.isBlank()) {
+                visitDockerHostForCleanup(hostUri.trim(), seenHosts, action);
+            }
+        }
+    }
+
+    private void visitDockerHostForCleanup(String hostUriOrNull, Set<String> seenHosts, Consumer<DockerClient> action) {
+        String key = hostUriOrNull == null || hostUriOrNull.isBlank() ? "" : hostUriOrNull;
+        if (!seenHosts.add(key)) {
+            return;
+        }
+        try {
+            action.accept(dockerClientForUri(hostUriOrNull));
+        } catch (RuntimeException e) {
+            log.warn("Skip Docker cleanup on host {}: {}", key.isEmpty() ? "default" : key, e.getMessage());
+        }
     }
 
     protected DockerClient createDockerClient(String explicitUriOrNull) {
@@ -321,7 +347,8 @@ public class ContainerExecutionService {
                 placeholders,
                 cmd,
                 hostConfig,
-                parseProfileEnvironmentVariables(profile));
+                parseProfileEnvironmentVariables(profile),
+                LoadTestContainerLabels.forTask(request.taskId()));
     }
 
     private List<Bind> resolveContainerBinds(
@@ -370,6 +397,7 @@ public class ContainerExecutionService {
         ensureImageExists(prepared.tool().getDockerImage(), prepared.docker());
         try (CreateContainerCmd createContainerCmd = prepared.docker().createContainerCmd(prepared.tool().getDockerImage())
                 .withName(prepared.containerName())
+                .withLabels(prepared.labels())
                 .withEntrypoint()
                 .withCmd(prepared.cmd().toArray(new String[0]))
                 .withWorkingDir("/mnt/test")
@@ -541,7 +569,8 @@ public class ContainerExecutionService {
             Map<String, String> placeholders,
             List<String> cmd,
             HostConfig hostConfig,
-            List<String> envVars) {}
+            List<String> envVars,
+            Map<String, String> labels) {}
 
     private static final class ContainerRunState {
         DockerClient docker;

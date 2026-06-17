@@ -35,6 +35,8 @@ kafka:
 loadtest:
   execution:
     stale-processing-grace-seconds: ${LOADTEST_EXECUTION_STALE_PROCESSING_GRACE_SECONDS:600}
+    exited-container-retention-hours: ${LOADTEST_EXECUTION_EXITED_CONTAINER_RETENTION_HOURS:48}
+    exited-container-cleanup-interval-ms: ${LOADTEST_EXECUTION_EXITED_CONTAINER_CLEANUP_INTERVAL_MS:3600000}
   summarization:
     default-summarizer-name: ${LOADTEST_DEFAULT_SUMMARIZER_NAME:}
 
